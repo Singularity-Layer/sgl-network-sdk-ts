@@ -1,0 +1,52 @@
+{
+  "name": "@singularity-layer/grid",
+  "version": "0.2.0",
+  "description": "TypeScript SDK for the SGL Network confidential compute grid",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "singularity",
+    "sgl",
+    "compute",
+    "grid",
+    "tee",
+    "confidential-computing",
+    "inference",
+    "ai",
+    "openai",
+    "serverless",
+    "processors",
+    "x402"
+  ],
+  "author": "Singularity Layer <dev@singularitylayer.xyz>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Singularity-Layer/sgl-network-sdk-ts"
+  },
+  "homepage": "https://singularitylayer.xyz",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  }
+}
