@@ -1,7 +1,7 @@
 {
   "name": "@singularity-layer/grid",
-  "version": "0.2.0",
-  "description": "TypeScript SDK for the SGL Network confidential compute grid",
+  "version": "0.3.0",
+  "description": "TypeScript SDK for the SGL Network confidential compute grid (end-to-end encrypted + streaming)",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -44,6 +44,12 @@
   "homepage": "https://singularitylayer.xyz",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.0.0",
+    "@noble/curves": "^1.6.0",
+    "@noble/hashes": "^1.5.0",
+    "bs58": "^6.0.0"
   },
   "devDependencies": {
     "tsup": "^8.0.0",

@@ -110,6 +110,26 @@ export interface ChatCompletionResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+  /** Confidential-compute attestation of the serving node (E2E path). */
+  attestation?: Attestation;
+}
+
+/** Confidential-compute attestation of the node that served the request. */
+export interface Attestation {
+  nodeId: string;
+  teeType: string | null;
+  verified: boolean;
+}
+
+/** Response from POST /v1/reserve — the node + the X25519 key to seal the prompt to. */
+export interface ReserveResponse {
+  reservation_token: string;
+  node_id: string;
+  node_x25519_pubkey: string;
+  node_ed25519_pubkey: string | null;
+  tee_type?: string | null;
+  attestation_verified?: boolean;
+  expires_in_ms: number;
 }
 
 // ─── Processors ──────────────────────────────────────────────────────────────

@@ -7,12 +7,14 @@ export {
   SGLConnectionError,
 } from "./errors.js";
 export type {
+  Attestation,
   AttestationProof,
   CapacityResponse,
   ChatChoice,
   ChatCompletionRequest,
   ChatCompletionResponse,
   ChatMessage,
+  ReserveResponse,
   DeployProcessorOptions,
   GridClientOptions,
   JobResponse,
