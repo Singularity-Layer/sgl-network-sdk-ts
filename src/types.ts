@@ -97,6 +97,9 @@ export interface ChatCompletionRequest {
   cluster?: string;
   /** Pay in the cluster's token instead of USDC (cluster requests only). */
   pay_in_coin?: boolean;
+  /** Max blended price (USD per 1M tokens) you'll accept — routes only to
+   * nodes at/under this and never bills above it. Omit for no cap. */
+  max_price?: number;
 }
 
 /** A node serving a model, with its effective per-token price. From `providers()`. */

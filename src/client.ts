@@ -164,11 +164,13 @@ export class GridClient {
     node?: string;
     cluster?: string;
     pay_in_coin?: boolean;
+    max_price?: number;
   }): Promise<ReserveResponse> {
     const body: Record<string, unknown> = { model: req.model };
     if (req.node) body.node = req.node;
     if (req.cluster) body.cluster = req.cluster;
     if (req.pay_in_coin) body.pay_in_coin = req.pay_in_coin;
+    if (req.max_price != null) body.max_price = req.max_price;
     const res = await this.request<ReserveResponse>("POST", "/v1/reserve", body);
     if (!res.node_x25519_pubkey) {
       throw new SGLAPIError(503, "Reserved node does not support E2E encryption");
