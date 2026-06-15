@@ -91,6 +91,34 @@ export interface ChatCompletionRequest {
   temperature?: number;
   max_tokens?: number;
   stream?: boolean;
+  /** Pin a specific provider node (else the grid routes). See `providers()`. */
+  node?: string;
+  /** Restrict to a cluster's nodes (cluster slug or id). */
+  cluster?: string;
+  /** Pay in the cluster's token instead of USDC (cluster requests only). */
+  pay_in_coin?: boolean;
+}
+
+/** A node serving a model, with its effective per-token price. From `providers()`. */
+export interface ProviderInfo {
+  node_id: string;
+  input_per_m: number;
+  output_per_m: number;
+  blended_per_1k: number;
+  /** true if the operator set a custom price; false = platform reference. */
+  is_custom: boolean;
+  reputation?: number;
+  load?: number;
+  max_concurrent_jobs?: number;
+  tee_type?: string;
+  online: boolean;
+}
+
+export interface ProvidersResponse {
+  model: string;
+  cluster: string | null;
+  count: number;
+  providers: ProviderInfo[];
 }
 
 export interface ChatChoice {

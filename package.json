@@ -1,6 +1,6 @@
 {
   "name": "@singularity-layer/grid",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "TypeScript SDK for the SGL Network confidential compute grid (end-to-end encrypted + streaming)",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

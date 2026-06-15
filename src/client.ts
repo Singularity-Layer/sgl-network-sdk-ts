@@ -17,6 +17,8 @@ import type {
   ProcessorListResponse,
   ProcessorLogEntry,
   ProcessorLogsResponse,
+  ProviderInfo,
+  ProvidersResponse,
   ReserveResponse,
   WalletAuth,
 } from "./types.js";
@@ -112,6 +114,25 @@ export class GridClient {
     return data.pricing ?? [];
   }
 
+  /**
+   * List the nodes serving a model with each node's effective per-token price
+   * (operator's custom price if set, else the platform reference), cheapest
+   * first. Pass a chosen `node_id` as `node` on `chatCompletions` to pin it,
+   * or omit to let the grid route. Optional `cluster` filter (slug or id).
+   */
+  async providers(
+    model: string,
+    options?: { cluster?: string },
+  ): Promise<ProviderInfo[]> {
+    const params = new URLSearchParams({ model });
+    if (options?.cluster) params.set("cluster", options.cluster);
+    const data = await this.request<ProvidersResponse>(
+      "GET",
+      `/v1/providers?${params.toString()}`,
+    );
+    return data.providers ?? [];
+  }
+
   // -- Authenticated endpoints ---------------------------------------------
 
   async submitJob(
@@ -135,9 +156,20 @@ export class GridClient {
 
   // -- OpenAI-compatible (end-to-end encrypted) ----------------------------
 
-  /** Reserve a node + learn its X25519 key so we can seal the prompt to it. */
-  private async reserve(model: string): Promise<ReserveResponse> {
-    const res = await this.request<ReserveResponse>("POST", "/v1/reserve", { model });
+  /** Reserve a node + learn its X25519 key so we can seal the prompt to it.
+   * Forwards an optional pinned `node` (see `providers()`), `cluster` filter,
+   * and `pay_in_coin` so the orchestrator reserves + quotes accordingly. */
+  private async reserve(req: {
+    model: string;
+    node?: string;
+    cluster?: string;
+    pay_in_coin?: boolean;
+  }): Promise<ReserveResponse> {
+    const body: Record<string, unknown> = { model: req.model };
+    if (req.node) body.node = req.node;
+    if (req.cluster) body.cluster = req.cluster;
+    if (req.pay_in_coin) body.pay_in_coin = req.pay_in_coin;
+    const res = await this.request<ReserveResponse>("POST", "/v1/reserve", body);
     if (!res.node_x25519_pubkey) {
       throw new SGLAPIError(503, "Reserved node does not support E2E encryption");
     }
@@ -163,7 +195,7 @@ export class GridClient {
       };
     }
 
-    const reservation = await this.reserve(request.model);
+    const reservation = await this.reserve(request);
     const { secret, pubB58 } = e2e.newResponseKeypair();
     const maxTokens = request.max_tokens ?? 512;
     const sealed = e2e.sealInputV2(
@@ -227,7 +259,7 @@ export class GridClient {
   async *chatCompletionStream(
     request: ChatCompletionRequest,
   ): AsyncGenerator<string, void, unknown> {
-    const reservation = await this.reserve(request.model);
+    const reservation = await this.reserve(request);
     const { secret, pubB58 } = e2e.newResponseKeypair();
     const nonce = e2e.randomNonceB58();
     const maxTokens = request.max_tokens ?? 512;
