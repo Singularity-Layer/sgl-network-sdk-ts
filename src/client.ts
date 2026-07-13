@@ -5,6 +5,8 @@ import type {
   CapacityResponse,
   ChatCompletionRequest,
   ChatCompletionResponse,
+  EmbeddingRequest,
+  EmbeddingResponse,
   DeployProcessorOptions,
   GridClientOptions,
   JobResponse,
@@ -250,6 +252,31 @@ export class GridClient {
         verified: !!reservation.attestation_verified,
       },
     };
+  }
+
+  /**
+   * Create embeddings via the grid's OpenAI-compatible `/v1/embeddings` endpoint.
+   *
+   * `input` is a string or array of strings; `dimensions` truncates Matryoshka models
+   * (e.g. nomic 768→256); `input_type` ('query' | 'document') hints asymmetric
+   * retrieval models. Billed on input tokens only — there is no generation. Requires
+   * an `apiKey` (credits); the TS SDK does not sign x402 payments. Unlike chat, the
+   * input is not client-sealed — the orchestrator seals it to the node in-TEE. The
+   * returned `data` is ordered to match `input`.
+   */
+  async embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
+    const body: Record<string, unknown> = { model: request.model, input: request.input };
+    if (request.dimensions != null) body.dimensions = request.dimensions;
+    if (request.input_type != null) body.input_type = request.input_type;
+    if (request.tier != null) body.tier = request.tier;
+    try {
+      return (await this.request("POST", "/v1/embeddings", body)) as EmbeddingResponse;
+    } catch (err) {
+      if (err instanceof SGLAPIError && err.statusCode === 402) {
+        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
+      }
+      throw err;
+    }
   }
 
   /**

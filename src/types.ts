@@ -102,6 +102,36 @@ export interface ChatCompletionRequest {
   max_price?: number;
 }
 
+/** Request for {@link SGLClient.embed}. `input` is a string or an array of strings. */
+export interface EmbeddingRequest {
+  model: string;
+  input: string | string[];
+  /** Truncate Matryoshka models (e.g. nomic 768→256). Ignored by fixed-size models. */
+  dimensions?: number;
+  /** Asymmetric-retrieval hint for models that support it. */
+  input_type?: "query" | "document";
+  /** Route tier: 'standard' (any node) or 'confidential' (attested only). */
+  tier?: "standard" | "confidential";
+}
+
+/** One embedding vector plus its position in the input array. */
+export interface EmbeddingDatum {
+  object: "embedding";
+  index: number;
+  embedding: number[];
+}
+
+/** OpenAI-compatible response from `/v1/embeddings`. */
+export interface EmbeddingResponse {
+  object: "list";
+  data: EmbeddingDatum[];
+  model: string;
+  usage?: {
+    prompt_tokens: number;
+    total_tokens: number;
+  };
+}
+
 /** A node serving a model, with its effective per-token price. From `providers()`. */
 export interface ProviderInfo {
   node_id: string;
