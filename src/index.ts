@@ -13,6 +13,7 @@ export type {
   ChatChoice,
   ChatCompletionRequest,
   ChatCompletionResponse,
+  ChatContentPart,
   ChatMessage,
   EmbeddingRequest,
   EmbeddingResponse,

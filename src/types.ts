@@ -80,9 +80,16 @@ export interface GridClientOptions {
   timeout?: number;
 }
 
+/** A part of a multimodal message: text, or an image (data URL or https URL). Send an
+ *  `image_url` part to a vision model to ask about an image. */
+export type ChatContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** Plain text, or an array of content parts for multimodal (vision) requests. */
+  content: string | ChatContentPart[];
 }
 
 export interface ChatCompletionRequest {
