@@ -1,5 +1,19 @@
 export { GridClient, DEFAULT_BASE_URL } from "./client.js";
 export {
+  VaultClient,
+  VAULT_URL,
+  encryptEnvelope,
+  decryptEnvelope,
+  parseAadFromKey,
+} from "./vault.js";
+export type {
+  VaultAad,
+  VaultAgent,
+  VaultSnapshot,
+  VaultUsage,
+  VaultClientOptions,
+} from "./vault.js";
+export {
   SGLError,
   SGLAPIError,
   SGLAuthError,
