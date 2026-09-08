@@ -132,3 +132,37 @@ try {
 ## License
 
 MIT
+
+## Processors
+
+Processors are served by `processors.x402compute.cc`, not the grid, so they have their own client.
+
+```ts
+import { ProcessorsClient } from "@singularity-layer/grid";
+
+const p = new ProcessorsClient({ apiKey: process.env.SGL_API_KEY });
+
+await p.catalogue();                       // public, no credential
+await p.list();                            // yours          (processors:read)
+await p.deploy({ manifest, code });        // returns the invoke token ONCE
+await p.update("my-processor", { code });
+await p.setListing("my-processor", true);
+await p.run("my-processor", { name: "world" }, invokeToken);
+```
+
+> **`processors:write` is full control** of processors owned by that key's wallet — delete and
+> secrets included, the same as a Cloudflare API token. Mint `processors:read` if you want a
+> credential that cannot change anything. Note that compute keys do not expire, there is no audit
+> log, and **delete is permanent**: the code is wiped and the slug is burned forever.
+
+`run()` takes the **invoke token** from `deploy()`, not the API key — the run route is the only one
+with both a money path and an anonymous buyer lane, so it does not read a key as an ownership
+claim. Buyers use `runWithPayment()` with an x402 header instead.
+
+### Upgrading from 0.8.x
+
+The six processor methods on `GridClient` (`deployProcessor`, `invokeProcessor`,
+`listProcessors`, `getProcessor`, `deleteProcessor`, `getProcessorLogs`) are **removed**. They
+pointed at `/grid/processors`, which has never existed — every call returned 404 — and their types
+described an older design that was never shipped. Use `ProcessorsClient`. Nothing else changed:
+chat, embeddings, jobs, models, capacity, pricing, reserve and the vault are untouched.
