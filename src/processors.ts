@@ -37,6 +37,31 @@ export const PROCESSORS_BASE_URL = "https://processors.x402compute.cc";
 
 const DEFAULT_TIMEOUT = 60_000;
 
+/**
+ * A base URL override must not become a way to post the management key somewhere else.
+ *
+ * The key is long-lived, does not expire, and grants full control of the caller's processors, so
+ * an `http://` or attacker-supplied origin is a credential disclosure rather than a
+ * misconfiguration. Plain HTTP is allowed only for loopback, which is how you point this at a
+ * local worker during development.
+ */
+function assertSafeBaseUrl(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error(`ProcessorsClient baseUrl is not a valid URL: ${raw}`);
+  }
+  const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1";
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && loopback)) {
+    throw new Error(
+      `ProcessorsClient baseUrl must be https (or http on localhost); got ${u.protocol}//${u.hostname}. ` +
+        "The API key is a long-lived full-control credential and must not be sent in the clear.",
+    );
+  }
+  return raw.replace(/\/+$/, "");
+}
+
 export interface ProcessorsClientOptions {
   /** Compute API key (`x402c_…`) holding `processors:read` or `processors:write`. */
   apiKey?: string;
@@ -173,7 +198,7 @@ export class ProcessorsClient {
   private readonly timeout: number;
 
   constructor(options: ProcessorsClientOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? PROCESSORS_BASE_URL).replace(/\/+$/, "");
+    this.baseUrl = assertSafeBaseUrl(options.baseUrl ?? PROCESSORS_BASE_URL);
     this.timeout = options.timeoutMs ?? DEFAULT_TIMEOUT;
     this.headers = { Accept: "application/json", "Content-Type": "application/json" };
     if (options.apiKey) this.headers["X-API-Key"] = options.apiKey;
@@ -184,6 +209,13 @@ export class ProcessorsClient {
     path: string,
     body?: unknown,
     extraHeaders?: Record<string, string>,
+    /**
+     * Send the management key? Default yes. Routes that carry their OWN credential — the public
+     * catalogue, and the two run paths, which authenticate with an invoke token or an x402
+     * payment — pass false, so a long-lived management key is not scattered through request logs
+     * and traces on calls that have no use for it.
+     */
+    sendApiKey = true,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
@@ -191,9 +223,11 @@ export class ProcessorsClient {
 
     let response: Response;
     try {
+      const base = { ...this.headers };
+      if (!sendApiKey) delete base["X-API-Key"];
       response = await fetch(url, {
         method,
-        headers: { ...this.headers, ...extraHeaders },
+        headers: { ...base, ...extraHeaders },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal,
       });
@@ -205,7 +239,9 @@ export class ProcessorsClient {
       clearTimeout(timer);
     }
 
-    if (response.status === 204) return undefined as T;
+    // `{}` rather than undefined: several methods below promise an object, and a 204
+    // would otherwise break that contract at runtime while typechecking fine.
+    if (response.status === 204) return {} as T;
 
     const text = await response.text();
     let parsed: unknown;
@@ -241,9 +277,16 @@ export class ProcessorsClient {
 
   // ── Discovery ────────────────────────────────────────────────────────────
 
-  /** The public catalogue. Needs no credential. */
+  /**
+   * The public catalogue.
+   *
+   * Sends NO credential, even when the client holds one. `GET /processors` is owner-scoped when a
+   * key is presented and public otherwise, so passing the key here would silently return your own
+   * processors instead of the catalogue — the opposite of what the name promises. Use `list()`
+   * when you want yours.
+   */
   async catalogue(): Promise<ProcessorListResponse> {
-    return this.request<ProcessorListResponse>("GET", "/processors");
+    return this.request<ProcessorListResponse>("GET", "/processors", undefined, undefined, false);
   }
 
   /** Processors owned by this key's wallet. Needs `processors:read`. */
@@ -375,6 +418,7 @@ export class ProcessorsClient {
       `/processors/${encodeURIComponent(slug)}/run`,
       { input },
       { Authorization: `Bearer ${invokeToken}` },
+      false,
     );
   }
 
@@ -400,6 +444,6 @@ export class ProcessorsClient {
     // WHOLE accepts array against a fixed chain list and throws on the first name it does not know,
     // so advertising it unprompted would stop a conformant buyer paying on Solana or Base either.
     if (acceptNetworks?.length) extra["X-Accept-Networks"] = acceptNetworks.join(",");
-    return this.request("POST", `/processors/${encodeURIComponent(slug)}/run`, { input }, extra);
+    return this.request("POST", `/processors/${encodeURIComponent(slug)}/run`, { input }, extra, false);
   }
 }
