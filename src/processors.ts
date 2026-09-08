@@ -45,21 +45,43 @@ const DEFAULT_TIMEOUT = 60_000;
  * misconfiguration. Plain HTTP is allowed only for loopback, which is how you point this at a
  * local worker during development.
  */
-function assertSafeBaseUrl(raw: string): string {
+function isLoopback(hostname: string): boolean {
+  // URL normalises an IPv6 literal WITH its brackets, so "::1" never appears here.
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
+function parseBaseUrl(raw: string): URL {
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
     throw new Error(`ProcessorsClient baseUrl is not a valid URL: ${raw}`);
   }
-  const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "::1";
-  if (u.protocol !== "https:" && !(u.protocol === "http:" && loopback)) {
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && isLoopback(u.hostname))) {
     throw new Error(
       `ProcessorsClient baseUrl must be https (or http on localhost); got ${u.protocol}//${u.hostname}. ` +
         "The API key is a long-lived full-control credential and must not be sent in the clear.",
     );
   }
-  return raw.replace(/\/+$/, "");
+  return u;
+}
+
+/**
+ * May the management key be sent to this host?
+ *
+ * https alone is not the question. `https://attacker.example` is a perfectly valid TLS origin,
+ * and if `baseUrl` is ever wired to an environment variable — which is exactly how people
+ * configure a staging host — then influencing that variable is enough to harvest a long-lived
+ * full-control credential. So the key travels only to the official host or to loopback unless the
+ * caller says otherwise, in one explicit flag they cannot set by accident.
+ */
+function keyAllowedOnHost(u: URL): boolean {
+  return u.origin === new URL(PROCESSORS_BASE_URL).origin || isLoopback(u.hostname);
 }
 
 export interface ProcessorsClientOptions {
@@ -67,6 +89,13 @@ export interface ProcessorsClientOptions {
   apiKey?: string;
   /** Override the base URL. Defaults to https://processors.x402compute.cc */
   baseUrl?: string;
+  /**
+   * Send the API key to a `baseUrl` that is neither the official host nor loopback.
+   *
+   * Off by default on purpose: see `keyAllowedOnHost`. Set it only when you genuinely run your
+   * own processors host and mean to hand it your credential.
+   */
+  allowKeyOnCustomHost?: boolean;
   timeoutMs?: number;
 }
 
@@ -198,10 +227,20 @@ export class ProcessorsClient {
   private readonly timeout: number;
 
   constructor(options: ProcessorsClientOptions = {}) {
-    this.baseUrl = assertSafeBaseUrl(options.baseUrl ?? PROCESSORS_BASE_URL);
+    const parsed = parseBaseUrl(options.baseUrl ?? PROCESSORS_BASE_URL);
+    this.baseUrl = (options.baseUrl ?? PROCESSORS_BASE_URL).replace(/\/+$/, "");
     this.timeout = options.timeoutMs ?? DEFAULT_TIMEOUT;
     this.headers = { Accept: "application/json", "Content-Type": "application/json" };
-    if (options.apiKey) this.headers["X-API-Key"] = options.apiKey;
+    if (options.apiKey) {
+      if (!keyAllowedOnHost(parsed) && !options.allowKeyOnCustomHost) {
+        throw new Error(
+          `ProcessorsClient refuses to send an API key to ${parsed.origin}. It is neither ` +
+            `${new URL(PROCESSORS_BASE_URL).origin} nor loopback. If you really do run your own ` +
+            "processors host, pass allowKeyOnCustomHost: true.",
+        );
+      }
+      this.headers["X-API-Key"] = options.apiKey;
+    }
   }
 
   private async request<T>(
