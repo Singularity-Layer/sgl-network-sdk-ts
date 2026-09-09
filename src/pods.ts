@@ -303,6 +303,45 @@ export class PodsClient {
     return (await this.request<{ wallet: any }>("GET", `/pods/${podId}/wallet`)).wallet;
   }
 
+  /**
+   * Change a pod wallet's spend controls.
+   *
+   * Needs `pods:wallet:write` — a general key that manages pods must not be able to raise the
+   * cap on the money it can spend. The field is `per_tx_cap_usd`, not `spend_cap_usd`; the
+   * API will list the editable names if you get it wrong.
+   */
+  async updateWallet(podId: string, patch: { send_enabled?: boolean; per_tx_cap_usd?: number; daily_cap_usd?: number; autonomy_mode?: string }): Promise<Record<string, unknown>> {
+    return this.request("PATCH", `/pods/${podId}/wallet`, patch);
+  }
+
+  /**
+   * Attach an MCP connector, giving the agent a new tool.
+   *
+   * Needs `pods:control:write` for the same reason: handing an agent new tools is not
+   * something a general-purpose key should do.
+   */
+  async addConnector(podId: string, connector: { name: string; url: string; transport?: string; headers?: Record<string, string> }): Promise<any[]> {
+    return (await this.request<{ connectors: any[] }>("POST", `/pods/${podId}/connectors`, connector)).connectors;
+  }
+
+  async removeConnector(podId: string, connectorId: string): Promise<any[]> {
+    return (await this.request<{ connectors: any[] }>("DELETE", `/pods/${podId}/connectors/${connectorId}`)).connectors;
+  }
+
+  /** Turn automatic backups on or off. Setting a passphrase needs `pods:wallet:write`. */
+  async updateBackups(podId: string, patch: { enabled: boolean; passphrase?: string }): Promise<{ enabled: boolean; passphrase_set: boolean }> {
+    return (await this.request<{ backups: any }>("PATCH", `/pods/${podId}/backups`, patch)).backups;
+  }
+
+  /** Mint a Telegram join code, or poll whether a group has claimed one. */
+  async telegramJoinCode(podId: string): Promise<{ code: string | null; expires_at: string | null }> {
+    return (await this.request<{ join: any }>("POST", `/pods/${podId}/channels/telegram/join-code`)).join;
+  }
+
+  async telegramJoinStatus(podId: string): Promise<{ active: boolean; claimed: any; next_step: string }> {
+    return (await this.request<{ join: any }>("GET", `/pods/${podId}/channels/telegram/join-code`)).join;
+  }
+
   async listConnectors(podId: string): Promise<any[]> {
     return (await this.request<{ connectors: any[] }>("GET", `/pods/${podId}/connectors`)).connectors;
   }
