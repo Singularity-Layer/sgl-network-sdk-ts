@@ -5,6 +5,7 @@ export type {
   PodStatus,
   PodEvent,
   PodWebhook,
+  PodUpdates,
   PodCapabilities,
   PodsClientOptions,
   CreatePodOptions,

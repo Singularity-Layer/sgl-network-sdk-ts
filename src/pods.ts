@@ -86,6 +86,18 @@ export interface Pod {
   created_at: string | null;
 }
 
+export interface PodUpdates {
+  mode: "auto" | "manual";
+  /** The version we are telling the pod to be on. In auto this is simply the latest. */
+  serving_version: string;
+  latest_version: string;
+  update_available: boolean;
+  /** The date the pod updates itself regardless. Null in auto. */
+  hold_expires_at: string | null;
+  /** True once the 30-day ceiling has passed: still `manual`, no longer holding anything. */
+  hold_expired: boolean;
+}
+
 export interface PodEvent {
   id: string;
   /** The paging cursor. Store the highest one you have handled. */
@@ -340,6 +352,73 @@ export class PodsClient {
 
   async telegramJoinStatus(podId: string): Promise<{ active: boolean; claimed: any; next_step: string }> {
     return (await this.request<{ join: any }>("GET", `/pods/${podId}/channels/telegram/join-code`)).join;
+  }
+
+  /**
+   * Who decides WHEN this pod takes our updates.
+   *
+   * By default we do: the pod polls every six hours and applies whatever we answer,
+   * restarting its gateway for about forty seconds. Fine for a pod you run for yourself,
+   * wrong for pods you run for customers who did not choose that moment.
+   *
+   * `manual` makes us keep answering with the version the pod already has, so it never
+   * updates itself, and you apply it with `queueAction(id, "update")` when it suits you.
+   * The hold expires after 30 days, because security fixes ride these bundles; the response
+   * always names the date so it is never a surprise.
+   */
+  async getUpdatePolicy(podId: string): Promise<PodUpdates> {
+    return (await this.request<{ updates: PodUpdates }>("GET", `/pods/${podId}/updates`)).updates;
+  }
+
+  async setUpdatePolicy(podId: string, mode: "auto" | "manual"): Promise<PodUpdates> {
+    return (await this.request<{ updates: PodUpdates }>("PATCH", `/pods/${podId}/updates`, { mode })).updates;
+  }
+
+  /**
+   * A short-lived ticket for the pod's streaming chat socket.
+   *
+   * `scope` tells you what the socket will accept. Without `pods:control:write` it is `chat`,
+   * which is conversation only. Most integrations want the OpenAI endpoint instead; this is
+   * for live sessions.
+   */
+  async chatTicket(podId: string): Promise<{ ticket: string; expires_in_seconds: number; scope: string; websocket_url: string; shared_session: string | null }> {
+    return (await this.request<{ chat: any }>("POST", `/pods/${podId}/chat-ticket`)).chat;
+  }
+
+  /**
+   * Attach the Telegram group that claimed the join code.
+   *
+   * Takes no chat id: it attaches only the group that claimed the code, because a claim
+   * proves somebody typed it inside that room. Existing groups are preserved.
+   */
+  async connectTelegramGroup(podId: string, opts: { require_mention?: boolean; prompt?: string } = {}): Promise<{ chat_id: string; title: string | null }> {
+    return (await this.request<{ channel: any }>("POST", `/pods/${podId}/channels/telegram/connect`, opts)).channel;
+  }
+
+  /**
+   * Approve someone to DM the agent.
+   *
+   * A stranger who finds the bot can DM it, and unlike a group nobody else sees that
+   * conversation, so the agent refuses unknown people and shows them a code. The code must
+   * come from the agent, so this approves a request somebody already made.
+   */
+  async approvePairing(podId: string, code: string, channel = "telegram"): Promise<{ approved_code: string }> {
+    return (await this.request<{ pairing: any }>("POST", `/pods/${podId}/channels/${channel}/pair`, { code })).pairing;
+  }
+
+  /**
+   * Move funds out of the pod's wallet. Needs `pods:wallet:write`.
+   *
+   * The spend cap is enforced server-side before the transfer and the pod holds no keys, so
+   * this cannot exceed the policy set by {@link updateWallet}.
+   */
+  async walletSend(podId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("POST", `/pods/${podId}/wallet/send`, body);
+  }
+
+  /** Pay an x402 endpoint from the pod's wallet. Needs `pods:wallet:write`. */
+  async walletPayX402(podId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("POST", `/pods/${podId}/wallet/x402/pay`, body);
   }
 
   async listConnectors(podId: string): Promise<any[]> {
