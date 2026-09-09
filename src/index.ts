@@ -1,4 +1,14 @@
 export { GridClient, DEFAULT_BASE_URL } from "./client.js";
+export { PodsClient, DEFAULT_PODS_BASE_URL, verifyPodWebhook } from "./pods.js";
+export type {
+  Pod,
+  PodStatus,
+  PodEvent,
+  PodWebhook,
+  PodCapabilities,
+  PodsClientOptions,
+  CreatePodOptions,
+} from "./pods.js";
 export {
   VaultClient,
   VAULT_URL,
