@@ -397,7 +397,7 @@ export class GridClient {
           const dataStr = raw.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n");
           if (!dataStr || dataStr === "[DONE]") continue;
           // Fail closed: a malformed or non-chunk data event is a protocol error.
-          let chunk: { seq?: number; final?: boolean; eph?: string; ct?: string };
+          let chunk: { seq?: number; final?: boolean; eph?: string; ct?: string; job?: string; sig?: string; sigv?: string };
           try {
             chunk = JSON.parse(dataStr);
           } catch {
@@ -413,6 +413,18 @@ export class GridClient {
             outKey = e2e.streamOutKey(secret, streamEph);
           }
           const isFinal = chunk.final === true;
+          // Verify EVERY chunk before opening it. The node signs each with kind
+          // `stream:{seq}:{final}` over the chunk ciphertext, and the
+          // orchestrator relays that signature rather than consuming it.
+          // Without this a compromised relay could splice or invent chunks —
+          // editing the answer as it arrives.
+          if (chunk.sigv && chunk.sigv !== "v1") {
+            throw new e2e.UnverifiedReplyError(`unknown chunk envelope version "${chunk.sigv}"`);
+          }
+          const chunkKind = `stream:${chunk.seq}:${isFinal ? 1 : 0}`;
+          if (!e2e.verifyResultEnvelope(reservation.node_ed25519_pubkey, chunk.job, chunkKind, chunk.ct, chunk.sig)) {
+            throw new e2e.UnverifiedReplyError(`stream chunk ${chunk.seq} is not signed by the reserved node`);
+          }
           const text = new TextDecoder().decode(
             e2e.openStreamChunk(outKey as Uint8Array, pubB58, streamEph as string, nonce, chunk.seq, isFinal, chunk.ct),
           );
