@@ -215,7 +215,10 @@ export class GridClient {
     };
 
     let data: {
-      id?: string; created?: number; sealed_result?: { ephemeral_public_key: string; ciphertext: string };
+      id?: string; job_id?: string; created?: number;
+      sealed_result?: { ephemeral_public_key: string; ciphertext: string };
+      result_envelope_signature?: string | null;
+      result_envelope_version?: string | null;
       usage?: ChatCompletionResponse["usage"];
     };
     try {
@@ -228,6 +231,9 @@ export class GridClient {
     }
 
     if (!data.sealed_result) throw new SGLAPIError(500, "No sealed result returned");
+    // Prove WHO produced this before opening it. AEAD only proves someone sealed
+    // it to our key, and the orchestrator is given that key in cleartext.
+    e2e.requireVerifiedReply(reservation, data);
     const plain = e2e.openOutputV2(secret, pubB58, data.sealed_result.ephemeral_public_key, data.sealed_result.ciphertext);
     const parsed = JSON.parse(new TextDecoder().decode(plain)) as { content?: string; usage?: ChatCompletionResponse["usage"] };
 
@@ -340,8 +346,16 @@ export class GridClient {
     const ctype = resp.headers.get("content-type") ?? "";
     if (!ctype.includes("text/event-stream") || !resp.body) {
       clearTimeout(overall);
-      const data = (await resp.json()) as { sealed_result?: { ephemeral_public_key: string; ciphertext: string } };
+      const data = (await resp.json()) as {
+        id?: string; job_id?: string;
+        sealed_result?: { ephemeral_public_key: string; ciphertext: string };
+        result_envelope_signature?: string | null;
+        result_envelope_version?: string | null;
+      };
       if (!data.sealed_result) throw new SGLAPIError(500, "No sealed result returned");
+      // Same check on the non-streaming fallback: an orchestrator that can force
+      // this path must not get an unverified reply through it.
+      e2e.requireVerifiedReply(reservation, data);
       const plain = e2e.openOutputV2(secret, pubB58, data.sealed_result.ephemeral_public_key, data.sealed_result.ciphertext);
       const content = (JSON.parse(new TextDecoder().decode(plain)) as { content?: string }).content ?? "";
       if (content) yield content;

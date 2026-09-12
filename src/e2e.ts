@@ -8,7 +8,7 @@
  * The orchestrator only ever relays ciphertext — it never sees the prompt or reply.
  */
 
-import { x25519 } from "@noble/curves/ed25519";
+import { ed25519, x25519 } from "@noble/curves/ed25519";
 import { xchacha20poly1305 } from "@noble/ciphers/chacha";
 import { sha256 } from "@noble/hashes/sha256";
 import { hkdf } from "@noble/hashes/hkdf";
@@ -116,4 +116,93 @@ export function openStreamChunk(
   const aad = aadStream(respPubB58, streamEphB58, reqNonceB58, seq, isFinal);
   const blob = b58dec(ctB58);
   return xchacha20poly1305(outKey, blob.slice(0, 24), aad).decrypt(blob.slice(24));
+}
+
+// ─── Reply attribution ──────────────────────────────────────────────────────
+
+/** A sealed reply could not be proven to come from the reserved node. */
+export class UnverifiedReplyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnverifiedReplyError";
+  }
+}
+
+/**
+ * Verify the node's v1 envelope signature over a sealed reply.
+ *
+ * The signature covers the PUBLIC ciphertext rather than the plaintext, so it
+ * verifies exactly — no re-serialising and no key-ordering problem. Message:
+ * `sgl-result-v1\n{job_id}\n{kind}\n{sha256hex(ciphertext)}`, hashing the
+ * ciphertext as the literal UTF-8 string, not as decoded bytes.
+ */
+export function verifyResultEnvelope(
+  nodeEd25519B58: string | null | undefined,
+  jobId: string | null | undefined,
+  kind: string,
+  ciphertext: string,
+  signatureB58: string | null | undefined,
+): boolean {
+  if (!nodeEd25519B58 || !signatureB58 || !jobId) return false;
+  try {
+    const digest = Array.from(sha256(new TextEncoder().encode(ciphertext)))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const msg = new TextEncoder().encode(`sgl-result-v1\n${jobId}\n${kind}\n${digest}`);
+    const sig = bs58.decode(signatureB58);
+    const key = bs58.decode(nodeEd25519B58);
+    if (sig.length !== 64 || key.length !== 32) return false;
+    return ed25519.verify(sig, msg, key);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refuse a sealed reply we cannot attribute to the reserved node.
+ *
+ * Mandatory, not best-effort: `client_response_pubkey` reaches the orchestrator
+ * in cleartext, so a compromised orchestrator cannot READ a prompt but CAN
+ * fabricate a reply, seal it to that key, and have it decrypt cleanly. AEAD
+ * proves only that someone sealed it to us; this proves who.
+ *
+ * A MISSING signature fails exactly like an invalid one. Every sealed reply
+ * carries one, so absence means something is wrong — and "warn and continue" is
+ * precisely what let this gap go unnoticed for months.
+ */
+export function requireVerifiedReply(
+  reservation: { node_ed25519_pubkey?: string | null },
+  data: {
+    id?: string;
+    job_id?: string;
+    sealed_result?: { ciphertext: string };
+    result_envelope_signature?: string | null;
+    result_envelope_version?: string | null;
+  },
+  kind = "sealed",
+): void {
+  if (data.result_envelope_version && data.result_envelope_version !== "v1") {
+    throw new UnverifiedReplyError(
+      `unknown result envelope version "${data.result_envelope_version}"`,
+    );
+  }
+  // job_id is explicit on current grids; older ones only embed it in `id`.
+  const jobId =
+    data.job_id ??
+    (data.id?.startsWith("chatcmpl-") ? data.id.slice("chatcmpl-".length) : undefined);
+  const ok = verifyResultEnvelope(
+    reservation.node_ed25519_pubkey,
+    jobId,
+    kind,
+    data.sealed_result?.ciphertext ?? "",
+    data.result_envelope_signature,
+  );
+  if (!ok) {
+    // NEVER fall back to `result_signature`: that legacy field signs the
+    // PLAINTEXT and is always absent for sealed replies, so reaching for it
+    // would make this check silently meaningless.
+    throw new UnverifiedReplyError(
+      "sealed reply is not signed by the reserved node — refusing it.",
+    );
+  }
 }
