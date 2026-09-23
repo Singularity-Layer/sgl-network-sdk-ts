@@ -26,6 +26,21 @@ export interface ModelInfo {
   sgl_pricing?: ModelPricing;
 }
 
+/** Model descriptor returned by OpenAI-compatible `GET /v1/models`. */
+export interface V1ModelInfo {
+  id: string;
+  object: "model" | string;
+  created?: number;
+  owned_by?: string;
+  permission?: unknown[];
+  root?: string | null;
+  parent?: string | null;
+  /** `systemone` for Laya/Jev-style typed decision models. */
+  type?: string;
+  context_window?: number;
+  max_questions?: number;
+}
+
 export interface PricingInfo {
   model: string;
   price_per_1k_input_tokens_usd: number;
@@ -137,6 +152,39 @@ export interface EmbeddingResponse {
     prompt_tokens: number;
     total_tokens: number;
   };
+}
+
+export type SystemOneQuestionType = "choice" | "score" | "noul" | string;
+
+export interface SystemOneQuestion {
+  type: SystemOneQuestionType;
+  instructions: string;
+  criteria?: unknown;
+  [key: string]: unknown;
+}
+
+/** Request body for `POST /v1/systemone` (Laya/System One typed decisions). */
+export interface SystemOneRequest {
+  /** Defaults to `convaiinnovations/laya`. */
+  model?: string;
+  state: Record<string, unknown>;
+  questions: Record<string, SystemOneQuestion>;
+  /** Pin a specific provider node when supported by the grid route. */
+  node?: string;
+  /** Restrict to a cluster's nodes (cluster slug or id). */
+  cluster?: string;
+  /** Max blended price you'll accept when supported by the grid route. */
+  max_price?: number;
+}
+
+/** Response from `POST /v1/systemone`. Answer values depend on each question type. */
+export interface SystemOneResponse {
+  object: string;
+  model: string;
+  answers: Record<string, unknown>;
+  usage?: Record<string, unknown>;
+  attestation?: Attestation;
+  [key: string]: unknown;
 }
 
 /** A node serving a model, with its effective per-token price. From `providers()`. */

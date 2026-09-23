@@ -15,6 +15,9 @@ import type {
   ProviderInfo,
   ProvidersResponse,
   ReserveResponse,
+  SystemOneRequest,
+  SystemOneResponse,
+  V1ModelInfo,
 } from "./types.js";
 
 export const DEFAULT_BASE_URL = "https://grid.x402compute.cc";
@@ -106,6 +109,19 @@ export class GridClient {
   async pricing(): Promise<PricingInfo[]> {
     const data = await this.request<{ pricing: PricingInfo[] }>("GET", "/grid/pricing");
     return data.pricing ?? [];
+  }
+
+  async v1Models(options?: { type?: string }): Promise<V1ModelInfo[]> {
+    const params = new URLSearchParams();
+    if (options?.type) params.set("type", options.type);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    const data = await this.request<{ data: V1ModelInfo[] }>("GET", `/v1/models${suffix}`);
+    return data.data ?? [];
+  }
+
+  /** List Laya/Jev-style System One typed-decision models. */
+  async systemOneModels(): Promise<V1ModelInfo[]> {
+    return this.v1Models({ type: "systemone" });
   }
 
   /**
@@ -269,6 +285,32 @@ export class GridClient {
     if (request.tier != null) body.tier = request.tier;
     try {
       return (await this.request("POST", "/v1/embeddings", body)) as EmbeddingResponse;
+    } catch (err) {
+      if (err instanceof SGLAPIError && err.statusCode === 402) {
+        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Call Laya/System One typed decisions via `/v1/systemone`.
+   *
+   * This is not a chat-completions model. Use it for compact typed outputs such
+   * as choices, scores, and no-output-language summaries. Requires `apiKey`
+   * (credits); the TS SDK does not sign x402 payments.
+   */
+  async systemOne(request: SystemOneRequest): Promise<SystemOneResponse> {
+    const body: Record<string, unknown> = {
+      model: request.model ?? "convaiinnovations/laya",
+      state: request.state,
+      questions: request.questions,
+    };
+    if (request.node != null) body.node = request.node;
+    if (request.cluster != null) body.cluster = request.cluster;
+    if (request.max_price != null) body.max_price = request.max_price;
+    try {
+      return (await this.request("POST", "/v1/systemone", body)) as SystemOneResponse;
     } catch (err) {
       if (err instanceof SGLAPIError && err.statusCode === 402) {
         throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");

@@ -52,6 +52,11 @@ export type {
   ModelPricing,
   PricingInfo,
   TeeCapacity,
+  SystemOneQuestion,
+  SystemOneQuestionType,
+  SystemOneRequest,
+  SystemOneResponse,
+  V1ModelInfo,
   WalletAuth,
 } from "./types.js";
 

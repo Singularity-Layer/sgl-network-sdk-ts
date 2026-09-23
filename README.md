@@ -64,6 +64,40 @@ pricing.forEach((p) =>
 );
 ```
 
+### System One / Laya
+
+Laya is served as a typed-decision model, not as chat completions.
+
+```typescript
+import { GridClient } from "@singularity-layer/grid";
+
+const grid = new GridClient({ apiKey: "x402c_..." });
+
+const systemOneModels = await grid.systemOneModels();
+console.log(systemOneModels.map((model) => model.id));
+
+const decision = await grid.systemOne({
+  model: "convaiinnovations/laya",
+  state: { ticket: "Enterprise customer cannot access billing exports" },
+  questions: {
+    route: {
+      type: "choice",
+      instructions: "Choose the best team.",
+      criteria: {
+        billing: "Billing, invoice, refund, or account credit issue.",
+        support: "Product defect or technical troubleshooting.",
+      },
+    },
+    urgency: {
+      type: "score",
+      instructions: "Score urgency from 0 to 1.",
+    },
+  },
+});
+
+console.log(decision.answers);
+```
+
 ### Submit a job
 
 ```typescript
