@@ -42,6 +42,16 @@ function b58enc(u: Uint8Array): string {
 function b58dec(s: string): Uint8Array {
   return bs58.decode(s);
 }
+function decodeCiphertext(ciphertext: string, encoding?: string): Uint8Array {
+  if (encoding === undefined) return b58dec(ciphertext);
+  if (encoding === "base64") {
+    const bin = atob(ciphertext);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  throw new Error(`unsupported sealed encoding: ${encoding}`);
+}
 function randomBytes(n: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(n));
 }
@@ -89,11 +99,12 @@ export function openOutputV2(
   respPubB58: string,
   nodeEphB58: string,
   ciphertextB58: string,
+  encoding?: string,
 ): Uint8Array {
   const shared = x25519.getSharedSecret(respSecret, b58dec(nodeEphB58));
   const key = v2Key(shared, HKDF_INFO_OUTPUT);
   const aad = aadOutput(respPubB58, nodeEphB58);
-  const blob = b58dec(ciphertextB58);
+  const blob = decodeCiphertext(ciphertextB58, encoding);
   return xchacha20poly1305(key, blob.slice(0, 24), aad).decrypt(blob.slice(24));
 }
 

@@ -94,3 +94,48 @@ test("create() keeps the server message for insufficient credits", async () => {
     (err) => err instanceof SGLAPIError && /Insufficient credits/.test(err.message) && err.body?.error?.type === "insufficient_credits",
   );
 });
+
+test("create({ private: true }) reserves then submits ciphertext only", async () => {
+  const nodeKey = "CAJHGxcLeS1E4BQtuzyyo7y7GBGUA9netokfsw1237xu";
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith("/v1/systemone/reserve")) {
+      return new Response(JSON.stringify({
+        reservation_token: "sys1.token",
+        node_id: "node-1",
+        node_x25519_pubkey: nodeKey,
+        node_ed25519_pubkey: null,
+        attestation_verified: true,
+        expires_in_ms: 60000,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      error: { message: "Insufficient credits.", type: "insufficient_credits" },
+    }), { status: 402, headers: { "Content-Type": "application/json" } });
+  };
+
+  await assert.rejects(
+    new GridClient({ baseUrl: BASE, apiKey: "scg_test" }).systemone.create({
+      model: "laya",
+      private: true,
+      state: { secret: "do not send me" },
+      questions: { q: { type: "noul", instructions: "?" } },
+    }),
+    (err) => err instanceof SGLAPIError && /Insufficient credits/.test(err.message),
+  );
+
+  assert.equal(calls[0].url, `${BASE}/v1/systemone/reserve`);
+  const reserveBody = JSON.parse(calls[0].init.body);
+  assert.deepEqual(Object.keys(reserveBody).sort(), ["input_tokens_upper_bound", "model"]);
+  assert.equal(reserveBody.model, "laya");
+  assert.equal(typeof reserveBody.input_tokens_upper_bound, "number");
+
+  assert.equal(calls[1].url, `${BASE}/v1/systemone`);
+  const submitBody = JSON.parse(calls[1].init.body);
+  assert.deepEqual(Object.keys(submitBody).sort(), ["enc", "reservation_token"]);
+  assert.equal(submitBody.reservation_token, "sys1.token");
+  assert.equal(typeof submitBody.enc.ciphertext, "string");
+  assert.equal(submitBody.enc.algorithm, "x25519-xchacha20poly1305-hkdf-v2");
+  assert.ok(!JSON.stringify(submitBody).includes("do not send me"));
+});

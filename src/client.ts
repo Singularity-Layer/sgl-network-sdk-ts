@@ -18,6 +18,7 @@ import type {
   SystemOneModelInfo,
   SystemOneRequest,
   SystemOneResponse,
+  SystemOneSealedResponse,
 } from "./types.js";
 
 export const DEFAULT_BASE_URL = "https://grid.x402compute.cc";
@@ -234,7 +235,7 @@ export class GridClient {
 
     let data: {
       id?: string; job_id?: string; created?: number;
-      sealed_result?: { ephemeral_public_key: string; ciphertext: string };
+      sealed_result?: { ephemeral_public_key: string; ciphertext: string; encoding?: string };
       result_envelope_signature?: string | null;
       result_envelope_version?: string | null;
       usage?: ChatCompletionResponse["usage"];
@@ -252,7 +253,7 @@ export class GridClient {
     // Prove WHO produced this before opening it. AEAD only proves someone sealed
     // it to our key, and the orchestrator is given that key in cleartext.
     e2e.requireVerifiedReply(reservation, data);
-    const plain = e2e.openOutputV2(secret, pubB58, data.sealed_result.ephemeral_public_key, data.sealed_result.ciphertext);
+    const plain = e2e.openOutputV2(secret, pubB58, data.sealed_result.ephemeral_public_key, data.sealed_result.ciphertext, data.sealed_result.encoding);
     const parsed = JSON.parse(new TextDecoder().decode(plain)) as { content?: string; usage?: ChatCompletionResponse["usage"] };
 
     return {
@@ -306,6 +307,7 @@ export class GridClient {
   }
 
   private async systemOneCreate(request: SystemOneRequest): Promise<SystemOneResponse> {
+    if (request.private) return this.systemOneCreatePrivate(request);
     const body: Record<string, unknown> = {
       model: request.model,
       state: request.state,
@@ -328,6 +330,91 @@ export class GridClient {
       }
       throw err;
     }
+  }
+
+  private estimateSystemOneInputTokens(request: SystemOneRequest): number {
+    if (request.input_tokens_upper_bound != null) return request.input_tokens_upper_bound;
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      state: request.state,
+      questions: request.questions,
+    })).length;
+    return Math.max(1, Math.ceil(bytes / 3));
+  }
+
+  private async systemOneReserve(request: SystemOneRequest): Promise<ReserveResponse & { price_usd?: number }> {
+    const tokens = this.estimateSystemOneInputTokens(request);
+    const body: Record<string, unknown> = {
+      model: request.model,
+      input_tokens_upper_bound: tokens,
+    };
+    if (request.tier != null) body.tier = request.tier;
+    const res = await this.request<ReserveResponse & { price_usd?: number }>("POST", "/v1/systemone/reserve", body);
+    if (!res.node_x25519_pubkey) {
+      throw new SGLAPIError(503, "Reserved System One node does not support E2E encryption");
+    }
+    return res;
+  }
+
+  private async systemOneCreatePrivate(request: SystemOneRequest): Promise<SystemOneResponse> {
+    const reservation = await this.systemOneReserve(request);
+    const { secret, pubB58 } = e2e.newResponseKeypair();
+    const payload: Record<string, unknown> = {
+      model: request.model,
+      state: request.state,
+      questions: request.questions,
+    };
+    if (request.task != null) payload.task = request.task;
+    if (request.lang != null) payload.lang = request.lang;
+
+    const sealed = e2e.sealInputV2(
+      reservation.node_x25519_pubkey,
+      pubB58,
+      new TextEncoder().encode(JSON.stringify(payload)),
+    );
+    const body = {
+      reservation_token: reservation.reservation_token,
+      enc: {
+        ciphertext: sealed.ciphertext,
+        client_ephemeral_pubkey: sealed.ephemeralPub,
+        client_response_pubkey: pubB58,
+        algorithm: e2e.ALGO_V2,
+      },
+    };
+
+    let data: SystemOneSealedResponse;
+    try {
+      data = await this.request<SystemOneSealedResponse>("POST", "/v1/systemone", body);
+    } catch (err) {
+      if (err instanceof SGLAPIError && err.statusCode === 402) {
+        const type = (err.body?.error as { type?: unknown } | undefined)?.type;
+        if (type === "payment_required") {
+          throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", err.body);
+        }
+      }
+      throw err;
+    }
+
+    if (!data.sealed_result) throw new SGLAPIError(500, "No sealed System One result returned");
+    e2e.requireVerifiedReply(reservation, data);
+    const plain = e2e.openOutputV2(
+      secret,
+      pubB58,
+      data.sealed_result.ephemeral_public_key,
+      data.sealed_result.ciphertext,
+      data.sealed_result.encoding,
+    );
+    const parsed = JSON.parse(new TextDecoder().decode(plain)) as Partial<SystemOneResponse>;
+    return {
+      ...parsed,
+      object: "systemone.result",
+      model: data.model,
+      answers: parsed.answers ?? {},
+      usage: {
+        input_tokens: data.usage?.input_tokens ?? parsed.usage?.input_tokens ?? 0,
+        output_tokens: data.usage?.output_tokens ?? parsed.usage?.output_tokens ?? 0,
+        cost_usd: data.usage?.cost_usd ?? parsed.usage?.cost_usd ?? 0,
+      },
+    };
   }
 
   /**
@@ -401,7 +488,7 @@ export class GridClient {
       clearTimeout(overall);
       const data = (await resp.json()) as {
         id?: string; job_id?: string;
-        sealed_result?: { ephemeral_public_key: string; ciphertext: string };
+        sealed_result?: { ephemeral_public_key: string; ciphertext: string; encoding?: string };
         result_envelope_signature?: string | null;
         result_envelope_version?: string | null;
       };
@@ -409,7 +496,7 @@ export class GridClient {
       // Same check on the non-streaming fallback: an orchestrator that can force
       // this path must not get an unverified reply through it.
       e2e.requireVerifiedReply(reservation, data);
-      const plain = e2e.openOutputV2(secret, pubB58, data.sealed_result.ephemeral_public_key, data.sealed_result.ciphertext);
+      const plain = e2e.openOutputV2(secret, pubB58, data.sealed_result.ephemeral_public_key, data.sealed_result.ciphertext, data.sealed_result.encoding);
       const content = (JSON.parse(new TextDecoder().decode(plain)) as { content?: string }).content ?? "";
       if (content) yield content;
       return;

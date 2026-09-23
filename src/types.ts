@@ -188,6 +188,13 @@ export interface SystemOneRequest {
   /** Route tier: 'standard' (any node) or 'confidential' (attested only). */
   tier?: "standard" | "confidential";
   user?: string;
+  /** Seal state/questions locally to an attested node; the orchestrator sees ciphertext only. */
+  private?: boolean;
+  /**
+   * Optional conservative input-token bound for private mode. If omitted, the SDK
+   * estimates from state+questions bytes using the grid's System One upper-bound rule.
+   */
+  input_tokens_upper_bound?: number;
 }
 
 export interface SystemOneChoiceAnswer {
@@ -227,6 +234,27 @@ export interface SystemOneResponse {
     output_tokens: number;
     /** What this call was billed, in USD. */
     cost_usd: number;
+  };
+}
+
+export interface SystemOneSealedResponse {
+  id: string;
+  object: "systemone.result.sealed";
+  created: number;
+  model: string;
+  job_id: string;
+  sealed_result: {
+    ciphertext: string;
+    ephemeral_public_key: string;
+    encoding?: string;
+    algorithm?: string;
+  };
+  result_envelope_signature?: string | null;
+  result_envelope_version?: string | null;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cost_usd?: number;
   };
 }
 
