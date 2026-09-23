@@ -88,6 +88,36 @@ const attestation = await grid.getAttestation(job.job_id);
 console.log(`Verified: ${attestation.verified}, TEE: ${attestation.tee_type}`);
 ```
 
+### System One (typed decisions)
+
+System One models, such as Laya, give typed answers about your application state. You do not parse text. Each question has an id and a type: `choice`, `score` or `noul`. You get one answer for each id. You pay for input tokens only, and you must set an `apiKey` (credits).
+
+```typescript
+import { GridClient } from "@singularity-layer/grid";
+
+const grid = new GridClient({ apiKey: "scg_..." });
+
+// Models the grid serves (empty when System One is off on the grid)
+const models = await grid.systemone.models();
+
+const res = await grid.systemone.create({
+  model: "convaiinnovations/laya",
+  state: { ticket: "My card was charged twice", plan: "pro" },
+  questions: {
+    route: {
+      type: "choice",
+      instructions: "Which team should handle this ticket?",
+      criteria: { billing: "Payments, refunds, invoices", support: "Everything else" },
+    },
+    urgency: { type: "score", instructions: "How urgent is it?", criteria: ["customer impact"] },
+  },
+});
+
+const route = res.answers.route;
+if (route.type === "choice") console.log(route.choice, route.probabilities);
+console.log(`cost: $${res.usage.cost_usd}`);
+```
+
 ## Configuration
 
 ```typescript

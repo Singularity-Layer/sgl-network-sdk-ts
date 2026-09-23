@@ -15,6 +15,9 @@ import type {
   ProviderInfo,
   ProvidersResponse,
   ReserveResponse,
+  SystemOneModelInfo,
+  SystemOneRequest,
+  SystemOneResponse,
 } from "./types.js";
 
 export const DEFAULT_BASE_URL = "https://grid.x402compute.cc";
@@ -26,6 +29,17 @@ export class GridClient {
   private readonly headers: Record<string, string>;
   private readonly timeout: number;
 
+  /**
+   * System One: typed decision models such as Laya. `create` sends application `state` plus
+   * questions keyed by id (`choice` | `score` | `noul`) to `/v1/systemone` and returns one typed
+   * answer per id. `models` lists what `GET /v1/models?type=systemone` advertises (empty while
+   * the grid has System One switched off). Billed on input only; requires an `apiKey` (credits).
+   */
+  readonly systemone: {
+    create(request: SystemOneRequest): Promise<SystemOneResponse>;
+    models(): Promise<SystemOneModelInfo[]>;
+  };
+
   constructor(options: GridClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
@@ -36,6 +50,10 @@ export class GridClient {
       // the paying wallet (credits mode) rather than falling back to anonymous x402.
       this.headers["X-API-Key"] = options.apiKey;
     }
+    this.systemone = {
+      create: (request) => this.systemOneCreate(request),
+      models: () => this.systemOneModels(),
+    };
   }
 
   private async request<T>(
@@ -272,6 +290,41 @@ export class GridClient {
     } catch (err) {
       if (err instanceof SGLAPIError && err.statusCode === 402) {
         throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
+      }
+      throw err;
+    }
+  }
+
+  private async systemOneModels(): Promise<SystemOneModelInfo[]> {
+    const data = await this.request<{ data?: SystemOneModelInfo[] }>(
+      "GET",
+      "/v1/models?type=systemone",
+    );
+    // The server already filters by type; re-check so a server ignoring ?type= can't hand a
+    // chat model to a caller expecting System One limits.
+    return (data.data ?? []).filter((m) => m.type === "systemone");
+  }
+
+  private async systemOneCreate(request: SystemOneRequest): Promise<SystemOneResponse> {
+    const body: Record<string, unknown> = {
+      model: request.model,
+      state: request.state,
+      questions: request.questions,
+    };
+    if (request.task != null) body.task = request.task;
+    if (request.lang != null) body.lang = request.lang;
+    if (request.tier != null) body.tier = request.tier;
+    if (request.user != null) body.user = request.user;
+    try {
+      return await this.request<SystemOneResponse>("POST", "/v1/systemone", body);
+    } catch (err) {
+      if (err instanceof SGLAPIError && err.statusCode === 402) {
+        const type = (err.body?.error as { type?: unknown } | undefined)?.type;
+        // Only the no-payment case means "use an apiKey". Insufficient credits and pod caps
+        // are also 402s, and their server message is the one the caller needs.
+        if (type === "payment_required") {
+          throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", err.body);
+        }
       }
       throw err;
     }

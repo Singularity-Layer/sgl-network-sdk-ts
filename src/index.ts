@@ -53,6 +53,18 @@ export type {
   PricingInfo,
   TeeCapacity,
   WalletAuth,
+  SystemOneQuestionType,
+  SystemOneQuestion,
+  SystemOneChoiceQuestion,
+  SystemOneScoreQuestion,
+  SystemOneNoulQuestion,
+  SystemOneRequest,
+  SystemOneAnswer,
+  SystemOneChoiceAnswer,
+  SystemOneScoreAnswer,
+  SystemOneNoulAnswer,
+  SystemOneResponse,
+  SystemOneModelInfo,
 } from "./types.js";
 
 // ─── Processors ──────────────────────────────────────────────────────────────

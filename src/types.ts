@@ -139,6 +139,112 @@ export interface EmbeddingResponse {
   };
 }
 
+// ─── System One ──────────────────────────────────────────────────────────────
+//
+// Typed decision models (e.g. Laya). The caller sends application `state` plus a map of
+// questions keyed by id; the node answers each one with a typed judgment. A separate modality
+// from chat: billed on input only, and the orchestrator structurally validates every answer
+// before it is returned (or charged).
+
+export type SystemOneQuestionType = "choice" | "score" | "noul";
+
+/** Pick one of the `criteria` keys. Needs at least two options. */
+export interface SystemOneChoiceQuestion {
+  type: "choice";
+  instructions: string;
+  /** Option id → description of when to pick it. */
+  criteria: Record<string, string>;
+}
+
+/** Score `state` against a list of criteria. */
+export interface SystemOneScoreQuestion {
+  type: "score";
+  instructions: string;
+  /** Non-empty strings. */
+  criteria: string[];
+}
+
+/** Free-form scalar answer (string, number or boolean). */
+export interface SystemOneNoulQuestion {
+  type: "noul";
+  instructions: string;
+}
+
+export type SystemOneQuestion =
+  | SystemOneChoiceQuestion
+  | SystemOneScoreQuestion
+  | SystemOneNoulQuestion;
+
+/** Request for {@link GridClient.systemone}`.create`. */
+export interface SystemOneRequest {
+  /** A System One model id, e.g. `convaiinnovations/laya` (or the `laya` alias). */
+  model: string;
+  /** Application state the questions are asked about. Any JSON value; must be non-empty. */
+  state: unknown;
+  /** Questions keyed by id (`[A-Za-z0-9_.:-]{1,96}`). Answers come back under the same ids. */
+  questions: Record<string, SystemOneQuestion>;
+  task?: string;
+  lang?: string;
+  /** Route tier: 'standard' (any node) or 'confidential' (attested only). */
+  tier?: "standard" | "confidential";
+  user?: string;
+}
+
+export interface SystemOneChoiceAnswer {
+  type: "choice";
+  /** One of the question's `criteria` keys. */
+  choice: string;
+  /** Option id → probability in [0, 1]. */
+  probabilities?: Record<string, number>;
+  confidence?: number;
+}
+
+export interface SystemOneScoreAnswer {
+  type: "score";
+  score: number;
+  confidence?: number;
+}
+
+export interface SystemOneNoulAnswer {
+  type: "noul";
+  value?: string | number | boolean | null;
+  confidence?: number;
+}
+
+export type SystemOneAnswer =
+  | SystemOneChoiceAnswer
+  | SystemOneScoreAnswer
+  | SystemOneNoulAnswer;
+
+/** Response from `POST /v1/systemone`. */
+export interface SystemOneResponse {
+  object: "systemone.result";
+  model: string;
+  /** One answer per question id in the request. */
+  answers: Record<string, SystemOneAnswer>;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    /** What this call was billed, in USD. */
+    cost_usd: number;
+  };
+}
+
+/** A System One model from `GET /v1/models?type=systemone`. */
+export interface SystemOneModelInfo {
+  id: string;
+  object: "model";
+  created: number;
+  owned_by: string;
+  type: "systemone";
+  /** Max input tokens (state + questions). */
+  context_window: number;
+  /** Max questions per request. */
+  max_questions: number;
+  /** true when the grid listed it from a fallback (e.g. its database was slow). */
+  degraded?: boolean;
+}
+
 /** A node serving a model, with its effective per-token price. From `providers()`. */
 export interface ProviderInfo {
   node_id: string;
