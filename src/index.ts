@@ -45,7 +45,9 @@ export {
   embeddingText,
   embeddingVideo,
   validateEmbeddingGemma2Input,
+  validateEmbeddingGemma2Request,
 } from "./embeddings.js";
+export type { EmbeddingGemma2ValidationOptions } from "./embeddings.js";
 export type {
   Attestation,
   AttestationProof,

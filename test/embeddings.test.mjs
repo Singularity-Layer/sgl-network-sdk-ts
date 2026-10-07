@@ -13,6 +13,7 @@ import {
   embeddingText,
   embeddingVideo,
   validateEmbeddingGemma2Input,
+  validateEmbeddingGemma2Request,
 } from "../dist/index.mjs";
 
 const okResponse = {
@@ -122,6 +123,19 @@ function declaredImage(bytes) {
   };
 }
 
+function declaredVideo(bytes, durationSeconds = 1) {
+  return {
+    type: "video",
+    duration_seconds: durationSeconds,
+    media: {
+      encoding: "base64",
+      mime_type: "video/mp4",
+      data: base64Zeros(bytes),
+      sha256: "0".repeat(64),
+    },
+  };
+}
+
 test("embeddingItem rejects two 5 MiB images because the 8 MiB limit is aggregate", () => {
   assert.throws(
     () => embeddingItem(declaredImage(5 * 1024 * 1024), declaredImage(5 * 1024 * 1024)),
@@ -189,6 +203,50 @@ test("request validator rejects aggregate images and duplicate audio/video befor
       }),
       (error) => error instanceof SGLEmbeddingInputError && error.code === "too_many_audio_parts",
     );
+    assert.equal(fetched, false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("complete request preflight rejects encoded body and processed context before fetch", async () => {
+  const oversizedBody = {
+    model: "embeddinggemma-2",
+    input: [{ content: [declaredVideo(16 * 1024 * 1024), declaredImage(2 * 1024 * 1024)] }],
+    input_type: "unspecified",
+  };
+  assert.throws(
+    () => validateEmbeddingGemma2Request(oversizedBody),
+    (error) => error instanceof SGLEmbeddingInputError && error.code === "request_too_large",
+  );
+  assert.throws(
+    () => validateEmbeddingGemma2Request({ model: "embeddinggemma-2", input: "x".repeat(8192) }),
+    (error) => error instanceof SGLEmbeddingInputError && error.code === "context_too_large",
+  );
+  for (const [update, code] of [
+    [{ dimensions: 64 }, "invalid_dimensions"],
+    [{ input_type: "other" }, "invalid_input_type"],
+    [{ encoding_format: "base64" }, "invalid_encoding_format"],
+  ]) {
+    assert.throws(
+      () => validateEmbeddingGemma2Request({ model: "embeddinggemma-2", input: "hello", ...update }),
+      (error) => error instanceof SGLEmbeddingInputError && error.code === code,
+    );
+  }
+
+  let fetched = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetched = true;
+    return new Response(JSON.stringify(okResponse));
+  };
+  try {
+    for (const request of [oversizedBody, { model: "embeddinggemma-2", input: "x".repeat(8192) }]) {
+      await assert.rejects(
+        new GridClient({ apiKey: "x402c_test", baseUrl: "https://grid.test" }).embed(request),
+        (error) => error instanceof SGLEmbeddingInputError,
+      );
+    }
     assert.equal(fetched, false);
   } finally {
     globalThis.fetch = realFetch;

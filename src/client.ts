@@ -1,6 +1,6 @@
 import { SGLAPIError, SGLAuthError, SGLConnectionError, SGLNotFoundError } from "./errors.js";
 import * as e2e from "./e2e.js";
-import { EMBEDDINGGEMMA2_MODEL, validateEmbeddingGemma2Input } from "./embeddings.js";
+import { EMBEDDINGGEMMA2_MODEL, validateEmbeddingGemma2Request } from "./embeddings.js";
 import type {
   AttestationProof,
   CapacityResponse,
@@ -281,14 +281,14 @@ export class GridClient {
    * The returned `data` is ordered to match `input`.
    */
   async embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
-    if (request.model === EMBEDDINGGEMMA2_MODEL) {
-      validateEmbeddingGemma2Input(request.input);
-    }
     const body: Record<string, unknown> = { model: request.model, input: request.input };
     if (request.dimensions != null) body.dimensions = request.dimensions;
     if (request.input_type != null) body.input_type = request.input_type;
     if (request.encoding_format != null) body.encoding_format = request.encoding_format;
     if (request.tier != null) body.tier = request.tier;
+    if (request.model === EMBEDDINGGEMMA2_MODEL) {
+      validateEmbeddingGemma2Request(body as unknown as EmbeddingRequest);
+    }
     try {
       return (await this.request("POST", "/v1/embeddings", body)) as EmbeddingResponse;
     } catch (err) {

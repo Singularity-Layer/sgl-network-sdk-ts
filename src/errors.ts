@@ -43,7 +43,12 @@ export type SGLEmbeddingInputErrorCode =
   | "too_many_parts"
   | "too_many_images"
   | "too_many_audio_parts"
-  | "too_many_video_parts";
+  | "too_many_video_parts"
+  | "request_too_large"
+  | "context_too_large"
+  | "invalid_dimensions"
+  | "invalid_input_type"
+  | "invalid_encoding_format";
 
 /** Deterministic client-side validation error thrown by embedding part helpers. */
 export class SGLEmbeddingInputError extends SGLError {

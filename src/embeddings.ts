@@ -8,7 +8,9 @@ import type {
   EmbeddingImageMimeType,
   EmbeddingImagePart,
   EmbeddingInput,
+  EmbeddingInputType,
   EmbeddingMediaMimeType,
+  EmbeddingRequest,
   EmbeddingTextPart,
   EmbeddingVideoMimeType,
   EmbeddingVideoPart,
@@ -45,6 +47,19 @@ export const EMBEDDINGGEMMA2_MIME_TYPES = {
   audio: ["audio/wav", "audio/flac", "audio/mpeg"],
   video: ["video/mp4"],
 } as const;
+
+const EMBEDDING_PREFIXES: Record<EmbeddingInputType, string> = {
+  query: "task: search result | query: ",
+  document: "title: none | text: ",
+  unspecified: "",
+};
+const TEXT_TEMPLATE_RESERVE = 12;
+
+export interface EmbeddingGemma2ValidationOptions {
+  input_type?: EmbeddingInputType;
+  dimensions?: number;
+  encoding_format?: "float";
+}
 
 type BinaryEmbeddingData = Uint8Array | ArrayBuffer;
 
@@ -141,7 +156,21 @@ function validateMediaPart(
  * Validate the SDK-visible EmbeddingGemma 2 request limits before a network call.
  * Runtime media truth (digest, dimensions, duration, and decoding) is still verified by the node.
  */
-export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
+export function validateEmbeddingGemma2Input(
+  input: EmbeddingInput,
+  options: EmbeddingGemma2ValidationOptions = {},
+): void {
+  const inputType = options.input_type ?? "unspecified";
+  if (!(inputType in EMBEDDING_PREFIXES)) {
+    throw new SGLEmbeddingInputError("invalid_input_type", `Unsupported input_type: ${String(inputType)}`);
+  }
+  if (options.dimensions != null
+    && !(EMBEDDINGGEMMA2_LIMITS.dimensions as readonly number[]).includes(options.dimensions)) {
+    throw new SGLEmbeddingInputError("invalid_dimensions", `Unsupported dimensions: ${options.dimensions}`);
+  }
+  if (options.encoding_format != null && options.encoding_format !== "float") {
+    throw new SGLEmbeddingInputError("invalid_encoding_format", "EmbeddingGemma 2 supports float vectors only");
+  }
   const items = typeof input === "string" ? [input] : input;
   if (!Array.isArray(items) || items.length === 0 || items.length > EMBEDDINGGEMMA2_LIMITS.maxBatchItems) {
     throw new SGLEmbeddingInputError(
@@ -155,6 +184,12 @@ export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
     if (typeof entry === "string") {
       if (!entry.length) {
         throw new SGLEmbeddingInputError("empty_text", "Embedding text must not be empty");
+      }
+      const bound = new TextEncoder().encode(entry).byteLength
+        + new TextEncoder().encode(EMBEDDING_PREFIXES[inputType]).byteLength
+        + TEXT_TEMPLATE_RESERVE;
+      if (bound > EMBEDDINGGEMMA2_LIMITS.maxProcessedTokensPerItem) {
+        throw new SGLEmbeddingInputError("context_too_large", "Embedding item exceeds the 8,192-token admission bound");
       }
       continue;
     }
@@ -172,6 +207,8 @@ export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
     let audio = 0;
     let video = 0;
     let imageBytes = 0;
+    let textBytes = 0;
+    let mediaTokenBound = 0;
     for (const rawPart of entry.content) {
       if (!isRecord(rawPart)) {
         throw new SGLEmbeddingInputError("invalid_content_part", "Invalid embedding content part");
@@ -180,6 +217,7 @@ export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
         if (typeof rawPart.text !== "string" || rawPart.text.length === 0) {
           throw new SGLEmbeddingInputError("empty_text", "Embedding text must not be empty");
         }
+        textBytes += new TextEncoder().encode(rawPart.text).byteLength;
         continue;
       }
       if (rawPart.type === "image") {
@@ -188,6 +226,7 @@ export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
           throw new SGLEmbeddingInputError("too_many_images", "An item can contain at most 8 images");
         }
         const bytes = validateMediaPart(rawPart, "image");
+        mediaTokenBound += 280;
         imageBytes += bytes;
         requestMediaBytes += bytes;
         if (imageBytes > EMBEDDINGGEMMA2_LIMITS.maxImageBytesPerItem) {
@@ -216,10 +255,18 @@ export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
           ? EMBEDDINGGEMMA2_LIMITS.maxAudioSeconds
           : EMBEDDINGGEMMA2_LIMITS.maxVideoSeconds;
         requireDuration(duration as number, maxSeconds, type);
+        mediaTokenBound += Math.ceil(duration as number) * (type === "audio" ? 25 : 140);
         requestMediaBytes += validateMediaPart(rawPart, type);
         continue;
       }
       throw new SGLEmbeddingInputError("invalid_content_part", "Unsupported embedding content part");
+    }
+    const processedBound = textBytes
+      + new TextEncoder().encode(EMBEDDING_PREFIXES[inputType]).byteLength
+      + TEXT_TEMPLATE_RESERVE
+      + mediaTokenBound;
+    if (processedBound > EMBEDDINGGEMMA2_LIMITS.maxProcessedTokensPerItem) {
+      throw new SGLEmbeddingInputError("context_too_large", "Embedding item exceeds the 8,192-token admission bound");
     }
   }
 
@@ -227,6 +274,23 @@ export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
     throw new SGLEmbeddingInputError(
       "request_media_too_large",
       `Decoded request media cannot exceed ${EMBEDDINGGEMMA2_LIMITS.maxRequestMediaBytes} bytes`,
+    );
+  }
+}
+
+/** Validate the complete JSON request, including encoded-body and request-option limits. */
+export function validateEmbeddingGemma2Request(request: EmbeddingRequest): void {
+  if (request.model !== EMBEDDINGGEMMA2_MODEL) return;
+  validateEmbeddingGemma2Input(request.input, {
+    input_type: request.input_type,
+    dimensions: request.dimensions,
+    encoding_format: request.encoding_format,
+  });
+  const bodyBytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
+  if (bodyBytes > EMBEDDINGGEMMA2_LIMITS.maxBodyBytes) {
+    throw new SGLEmbeddingInputError(
+      "request_too_large",
+      `Encoded embedding request is ${bodyBytes} bytes; the limit is ${EMBEDDINGGEMMA2_LIMITS.maxBodyBytes}`,
     );
   }
 }
