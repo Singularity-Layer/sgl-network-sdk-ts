@@ -124,14 +124,76 @@ export interface ChatCompletionRequest {
   max_price?: number;
 }
 
-/** Request for {@link SGLClient.embed}. `input` is a string or an array of strings. */
+export type EmbeddingModality = "text" | "image" | "audio" | "video";
+
+export type EmbeddingInputType = "query" | "document" | "unspecified";
+
+/** Matryoshka output sizes supported by EmbeddingGemma 2. */
+export type EmbeddingGemma2Dimension = 768 | 512 | 256 | 128;
+
+export type EmbeddingImageMimeType = "image/jpeg" | "image/png" | "image/webp";
+export type EmbeddingAudioMimeType = "audio/wav" | "audio/flac" | "audio/mpeg";
+export type EmbeddingVideoMimeType = "video/mp4";
+export type EmbeddingMediaMimeType =
+  | EmbeddingImageMimeType
+  | EmbeddingAudioMimeType
+  | EmbeddingVideoMimeType;
+
+/** Inline media accepted by EmbeddingGemma 2. Remote URLs and local paths are not accepted. */
+export interface InlineEmbeddingMedia {
+  encoding: "base64";
+  mime_type: EmbeddingMediaMimeType;
+  data: string;
+  /** Lowercase SHA-256 of the decoded bytes. */
+  sha256: string;
+}
+
+export interface EmbeddingTextPart {
+  type: "text";
+  text: string;
+}
+
+export interface EmbeddingImagePart {
+  type: "image";
+  media: InlineEmbeddingMedia & { mime_type: EmbeddingImageMimeType };
+}
+
+export interface EmbeddingAudioPart {
+  type: "audio";
+  media: InlineEmbeddingMedia & { mime_type: EmbeddingAudioMimeType };
+  duration_seconds: number;
+}
+
+export interface EmbeddingVideoPart {
+  type: "video";
+  media: InlineEmbeddingMedia & { mime_type: EmbeddingVideoMimeType };
+  duration_seconds: number;
+}
+
+/** Ordered content. Part order is preserved when the grid builds the embedding input. */
+export type EmbeddingContentPart =
+  | EmbeddingTextPart
+  | EmbeddingImagePart
+  | EmbeddingAudioPart
+  | EmbeddingVideoPart;
+
+export interface MultimodalEmbeddingItem {
+  content: EmbeddingContentPart[];
+}
+
+/** A legacy text input or an ordered batch mixing legacy text and multimodal items. */
+export type EmbeddingInput = string | Array<string | MultimodalEmbeddingItem>;
+
+/** Request for {@link GridClient.embed}. */
 export interface EmbeddingRequest {
   model: string;
-  input: string | string[];
-  /** Truncate Matryoshka models (e.g. nomic 768→256). Ignored by fixed-size models. */
+  input: EmbeddingInput;
+  /** Truncate Matryoshka models. EmbeddingGemma 2 supports 768, 512, 256, and 128. */
   dimensions?: number;
-  /** Asymmetric-retrieval hint for models that support it. */
-  input_type?: "query" | "document";
+  /** Retrieval hint. `unspecified` is supported by EmbeddingGemma 2 and adds no prefix. */
+  input_type?: EmbeddingInputType;
+  /** The grid currently returns float vectors only. */
+  encoding_format?: "float";
   /** Route tier: 'standard' (any node) or 'confidential' (attested only). */
   tier?: "standard" | "confidential";
 }
@@ -143,15 +205,53 @@ export interface EmbeddingDatum {
   embedding: number[];
 }
 
+export interface EmbeddingUsageBreakdown {
+  text: number;
+  image: number;
+  audio: number;
+  video: number;
+}
+
+export interface EmbeddingUsage {
+  prompt_tokens: number;
+  total_tokens: number;
+  cost_usd?: number;
+  /** Present for EmbeddingGemma 2; values sum to `prompt_tokens`. */
+  breakdown?: EmbeddingUsageBreakdown;
+}
+
+/** Stable server-side categories returned by the embeddings endpoint. */
+export type EmbeddingErrorType =
+  | "invalid_request_error"
+  | "model_not_found"
+  | "model_not_available"
+  | "node_not_available"
+  | "invalid_api_key"
+  | "insufficient_scope"
+  | "invalid_session"
+  | "insufficient_credits"
+  | "pod_cap_reached"
+  | "payment_required"
+  | "payment_error"
+  | "timeout"
+  | "inference_error"
+  | "server_error";
+
+/** Privacy-safe synchronous codes that can accompany `invalid_request_error`. */
+export type EmbeddingFailureCode =
+  | "embedding_input_invalid"
+  | "embedding_context_overflow";
+
 /** OpenAI-compatible response from `/v1/embeddings`. */
 export interface EmbeddingResponse {
   object: "list";
   data: EmbeddingDatum[];
   model: string;
-  usage?: {
-    prompt_tokens: number;
-    total_tokens: number;
-  };
+  usage?: EmbeddingUsage;
+  /** Present for EmbeddingGemma 2 responses. */
+  processor_revision?: string;
+  /** Present for EmbeddingGemma 2 responses. */
+  embedding_protocol?: "embedding-multimodal-v1";
 }
 
 export type SystemOneQuestionType = "choice" | "score" | "noul" | string;
