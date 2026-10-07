@@ -7,6 +7,7 @@ import type {
   EmbeddingContentPart,
   EmbeddingImageMimeType,
   EmbeddingImagePart,
+  EmbeddingInput,
   EmbeddingMediaMimeType,
   EmbeddingTextPart,
   EmbeddingVideoMimeType,
@@ -24,10 +25,13 @@ export const EMBEDDINGGEMMA2_LIMITS = {
   maxBatchItems: 16,
   maxPartsPerItem: 16,
   maxImagesPerItem: 8,
-  maxImageBytes: 8 * 1024 * 1024,
+  /** Aggregate decoded image bytes across one item's image parts. */
+  maxImageBytesPerItem: 8 * 1024 * 1024,
   maxImagePixels: 16_000_000,
+  maxAudioPartsPerItem: 1,
   maxAudioBytes: 8 * 1024 * 1024,
   maxAudioSeconds: 30,
+  maxVideoPartsPerItem: 1,
   maxVideoBytes: 16 * 1024 * 1024,
   maxVideoSeconds: 32,
   maxVideoFrames: 32,
@@ -44,6 +48,10 @@ export const EMBEDDINGGEMMA2_MIME_TYPES = {
 
 type BinaryEmbeddingData = Uint8Array | ArrayBuffer;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function toBytes(data: BinaryEmbeddingData): Uint8Array {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   if (bytes.byteLength === 0) {
@@ -54,7 +62,7 @@ function toBytes(data: BinaryEmbeddingData): Uint8Array {
 
 function mediaLimit(mimeType: EmbeddingMediaMimeType): number {
   if ((EMBEDDINGGEMMA2_MIME_TYPES.image as readonly string[]).includes(mimeType)) {
-    return EMBEDDINGGEMMA2_LIMITS.maxImageBytes;
+    return EMBEDDINGGEMMA2_LIMITS.maxImageBytesPerItem;
   }
   if ((EMBEDDINGGEMMA2_MIME_TYPES.audio as readonly string[]).includes(mimeType)) {
     return EMBEDDINGGEMMA2_LIMITS.maxAudioBytes;
@@ -66,6 +74,161 @@ function mediaLimit(mimeType: EmbeddingMediaMimeType): number {
     "unsupported_media_type",
     `Unsupported EmbeddingGemma 2 media type: ${mimeType}`,
   );
+}
+
+function mediaModality(mimeType: unknown): "image" | "audio" | "video" | null {
+  if (typeof mimeType !== "string") return null;
+  if ((EMBEDDINGGEMMA2_MIME_TYPES.image as readonly string[]).includes(mimeType)) return "image";
+  if ((EMBEDDINGGEMMA2_MIME_TYPES.audio as readonly string[]).includes(mimeType)) return "audio";
+  if ((EMBEDDINGGEMMA2_MIME_TYPES.video as readonly string[]).includes(mimeType)) return "video";
+  return null;
+}
+
+/** Return decoded byte length only for strict canonical base64. */
+function decodedBase64Bytes(data: unknown): number | null {
+  if (typeof data !== "string" || data.length === 0 || data.length % 4 !== 0) return null;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(data)) return null;
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  if (padding && data.length - padding < 2) return null;
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  if (padding && (alphabet.indexOf(data[data.length - padding - 1]) & (padding === 2 ? 15 : 3))) {
+    return null;
+  }
+  return data.length / 4 * 3 - padding;
+}
+
+function validateMediaPart(
+  part: Record<string, unknown>,
+  expected: "image" | "audio" | "video",
+): number {
+  if (!isRecord(part.media) || part.media.encoding !== "base64") {
+    throw new SGLEmbeddingInputError(
+      "invalid_media_data",
+      `${expected} parts require inline base64 media`,
+    );
+  }
+  const modality = mediaModality(part.media.mime_type);
+  if (modality !== expected) {
+    throw new SGLEmbeddingInputError(
+      "unsupported_media_type",
+      `Unsupported ${expected} media type: ${String(part.media.mime_type)}`,
+    );
+  }
+  if (typeof part.media.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(part.media.sha256)) {
+    throw new SGLEmbeddingInputError(
+      "invalid_media_data",
+      `${expected} media requires a lowercase SHA-256 digest`,
+    );
+  }
+  const bytes = decodedBase64Bytes(part.media.data);
+  if (bytes === null) {
+    throw new SGLEmbeddingInputError(
+      "invalid_media_data",
+      `${expected} media must use canonical base64`,
+    );
+  }
+  const limit = mediaLimit(part.media.mime_type as EmbeddingMediaMimeType);
+  if (bytes > limit) {
+    throw new SGLEmbeddingInputError(
+      "media_too_large",
+      `${expected} media is ${bytes} bytes; the limit is ${limit}`,
+    );
+  }
+  return bytes;
+}
+
+/**
+ * Validate the SDK-visible EmbeddingGemma 2 request limits before a network call.
+ * Runtime media truth (digest, dimensions, duration, and decoding) is still verified by the node.
+ */
+export function validateEmbeddingGemma2Input(input: EmbeddingInput): void {
+  const items = typeof input === "string" ? [input] : input;
+  if (!Array.isArray(items) || items.length === 0 || items.length > EMBEDDINGGEMMA2_LIMITS.maxBatchItems) {
+    throw new SGLEmbeddingInputError(
+      "invalid_batch",
+      `EmbeddingGemma 2 requires 1-${EMBEDDINGGEMMA2_LIMITS.maxBatchItems} batch items`,
+    );
+  }
+
+  let requestMediaBytes = 0;
+  for (const entry of items) {
+    if (typeof entry === "string") {
+      if (!entry.length) {
+        throw new SGLEmbeddingInputError("empty_text", "Embedding text must not be empty");
+      }
+      continue;
+    }
+    if (!isRecord(entry) || !Array.isArray(entry.content)) {
+      throw new SGLEmbeddingInputError("invalid_content_part", "Embedding items require content");
+    }
+    if (entry.content.length === 0 || entry.content.length > EMBEDDINGGEMMA2_LIMITS.maxPartsPerItem) {
+      throw new SGLEmbeddingInputError(
+        "too_many_parts",
+        `Embedding items require 1-${EMBEDDINGGEMMA2_LIMITS.maxPartsPerItem} ordered content parts`,
+      );
+    }
+
+    let images = 0;
+    let audio = 0;
+    let video = 0;
+    let imageBytes = 0;
+    for (const rawPart of entry.content) {
+      if (!isRecord(rawPart)) {
+        throw new SGLEmbeddingInputError("invalid_content_part", "Invalid embedding content part");
+      }
+      if (rawPart.type === "text") {
+        if (typeof rawPart.text !== "string" || rawPart.text.length === 0) {
+          throw new SGLEmbeddingInputError("empty_text", "Embedding text must not be empty");
+        }
+        continue;
+      }
+      if (rawPart.type === "image") {
+        images += 1;
+        if (images > EMBEDDINGGEMMA2_LIMITS.maxImagesPerItem) {
+          throw new SGLEmbeddingInputError("too_many_images", "An item can contain at most 8 images");
+        }
+        const bytes = validateMediaPart(rawPart, "image");
+        imageBytes += bytes;
+        requestMediaBytes += bytes;
+        if (imageBytes > EMBEDDINGGEMMA2_LIMITS.maxImageBytesPerItem) {
+          throw new SGLEmbeddingInputError(
+            "media_too_large",
+            `Aggregate image media per item cannot exceed ${EMBEDDINGGEMMA2_LIMITS.maxImageBytesPerItem} bytes`,
+          );
+        }
+        continue;
+      }
+      if (rawPart.type === "audio" || rawPart.type === "video") {
+        const type = rawPart.type;
+        if (type === "audio") {
+          audio += 1;
+          if (audio > EMBEDDINGGEMMA2_LIMITS.maxAudioPartsPerItem) {
+            throw new SGLEmbeddingInputError("too_many_audio_parts", "An item can contain at most one audio part");
+          }
+        } else {
+          video += 1;
+          if (video > EMBEDDINGGEMMA2_LIMITS.maxVideoPartsPerItem) {
+            throw new SGLEmbeddingInputError("too_many_video_parts", "An item can contain at most one video part");
+          }
+        }
+        const duration = rawPart.duration_seconds;
+        const maxSeconds = type === "audio"
+          ? EMBEDDINGGEMMA2_LIMITS.maxAudioSeconds
+          : EMBEDDINGGEMMA2_LIMITS.maxVideoSeconds;
+        requireDuration(duration as number, maxSeconds, type);
+        requestMediaBytes += validateMediaPart(rawPart, type);
+        continue;
+      }
+      throw new SGLEmbeddingInputError("invalid_content_part", "Unsupported embedding content part");
+    }
+  }
+
+  if (requestMediaBytes > EMBEDDINGGEMMA2_LIMITS.maxRequestMediaBytes) {
+    throw new SGLEmbeddingInputError(
+      "request_media_too_large",
+      `Decoded request media cannot exceed ${EMBEDDINGGEMMA2_LIMITS.maxRequestMediaBytes} bytes`,
+    );
+  }
 }
 
 function base64Encode(bytes: Uint8Array): string {
@@ -157,13 +320,9 @@ export function embeddingVideo(
   };
 }
 
-/** Build one ordered multimodal batch item and enforce the public part-count limit. */
+/** Build and validate one ordered multimodal batch item. */
 export function embeddingItem(...content: EmbeddingContentPart[]): MultimodalEmbeddingItem {
-  if (content.length === 0 || content.length > EMBEDDINGGEMMA2_LIMITS.maxPartsPerItem) {
-    throw new SGLEmbeddingInputError(
-      "too_many_parts",
-      `Embedding items require 1-${EMBEDDINGGEMMA2_LIMITS.maxPartsPerItem} ordered content parts`,
-    );
-  }
-  return { content };
+  const item = { content };
+  validateEmbeddingGemma2Input([item]);
+  return item;
 }

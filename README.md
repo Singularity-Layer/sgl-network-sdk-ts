@@ -102,10 +102,11 @@ and `embeddingVideo` when those media types are needed; both require `duration_s
 
 Media must be inline. Supported types are JPEG, PNG, WebP, WAV, FLAC, MP3, and MP4. The
 request limits are exported as `EMBEDDINGGEMMA2_LIMITS`: 16 batch items, 16 parts per item,
-8 images per item, 8 MiB per image or audio file, 16 MiB per video, 20 MiB decoded media per
-request, 30 seconds of audio, 32 seconds of video sampled at up to 32 frames, and 8192
-processed tokens per item. Output dimensions are 768, 512, 256, and 128. Remote media URLs
-are not accepted.
+8 images totaling at most 8 MiB per item, one audio part up to 8 MiB, one video part up to
+16 MiB, 20 MiB decoded media per request, 30 seconds of audio, 32 seconds of video sampled
+at up to 32 frames, and 8192 processed tokens per item. Output dimensions are 768, 512, 256,
+and 128. Remote media URLs are not accepted. `embeddingItem(...)` and `grid.embed(...)`
+enforce the SDK-visible limits before sending a request; the node verifies decoded media.
 
 ### System One / Laya
 

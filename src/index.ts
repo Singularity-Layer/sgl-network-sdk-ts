@@ -44,6 +44,7 @@ export {
   embeddingItem,
   embeddingText,
   embeddingVideo,
+  validateEmbeddingGemma2Input,
 } from "./embeddings.js";
 export type {
   Attestation,

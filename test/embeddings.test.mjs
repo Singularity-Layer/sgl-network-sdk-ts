@@ -12,6 +12,7 @@ import {
   embeddingItem,
   embeddingText,
   embeddingVideo,
+  validateEmbeddingGemma2Input,
 } from "../dist/index.mjs";
 
 const okResponse = {
@@ -95,6 +96,103 @@ test("audio and video helpers enforce duration limits with stable client codes",
     () => embeddingAudio(bytes, "audio/wav", EMBEDDINGGEMMA2_LIMITS.maxAudioSeconds + 1),
     (error) => error instanceof SGLEmbeddingInputError && error.code === "invalid_duration",
   );
+});
+
+test("published limits expose per-item image, audio, and video cardinality", () => {
+  assert.equal(EMBEDDINGGEMMA2_LIMITS.maxImageBytesPerItem, 8 * 1024 * 1024);
+  assert.equal(EMBEDDINGGEMMA2_LIMITS.maxAudioPartsPerItem, 1);
+  assert.equal(EMBEDDINGGEMMA2_LIMITS.maxVideoPartsPerItem, 1);
+  assert.equal("maxImageBytes" in EMBEDDINGGEMMA2_LIMITS, false);
+});
+
+function base64Zeros(bytes) {
+  return "AAAA".repeat(Math.floor(bytes / 3))
+    + (bytes % 3 === 1 ? "AA==" : bytes % 3 === 2 ? "AAA=" : "");
+}
+
+function declaredImage(bytes) {
+  return {
+    type: "image",
+    media: {
+      encoding: "base64",
+      mime_type: "image/png",
+      data: base64Zeros(bytes),
+      sha256: "0".repeat(64),
+    },
+  };
+}
+
+test("embeddingItem rejects two 5 MiB images because the 8 MiB limit is aggregate", () => {
+  assert.throws(
+    () => embeddingItem(declaredImage(5 * 1024 * 1024), declaredImage(5 * 1024 * 1024)),
+    (error) => error instanceof SGLEmbeddingInputError && error.code === "media_too_large",
+  );
+});
+
+test("embeddingItem rejects duplicate audio and video parts", () => {
+  const bytes = new Uint8Array([1]);
+  assert.throws(
+    () => embeddingItem(
+      embeddingAudio(bytes, "audio/wav", 1),
+      embeddingAudio(bytes, "audio/wav", 1),
+    ),
+    (error) => error instanceof SGLEmbeddingInputError && error.code === "too_many_audio_parts",
+  );
+  assert.throws(
+    () => embeddingItem(
+      embeddingVideo(bytes, "video/mp4", 1),
+      embeddingVideo(bytes, "video/mp4", 1),
+    ),
+    (error) => error instanceof SGLEmbeddingInputError && error.code === "too_many_video_parts",
+  );
+});
+
+test("request validator rejects aggregate images and duplicate audio/video before fetch", async () => {
+  const bytes = new Uint8Array([1]);
+  const duplicateAudio = {
+    content: [
+      embeddingAudio(bytes, "audio/wav", 1),
+      embeddingAudio(bytes, "audio/wav", 1),
+    ],
+  };
+  const duplicateVideo = {
+    content: [
+      embeddingVideo(bytes, "video/mp4", 1),
+      embeddingVideo(bytes, "video/mp4", 1),
+    ],
+  };
+  const excessiveImages = {
+    content: [declaredImage(5 * 1024 * 1024), declaredImage(5 * 1024 * 1024)],
+  };
+  for (const [item, code] of [
+    [duplicateAudio, "too_many_audio_parts"],
+    [duplicateVideo, "too_many_video_parts"],
+    [excessiveImages, "media_too_large"],
+  ]) {
+    assert.throws(
+      () => validateEmbeddingGemma2Input([item]),
+      (error) => error instanceof SGLEmbeddingInputError && error.code === code,
+    );
+  }
+
+  let fetched = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetched = true;
+    return new Response(JSON.stringify(okResponse));
+  };
+  try {
+    await assert.rejects(
+      new GridClient({ apiKey: "x402c_test", baseUrl: "https://grid.test" }).embed({
+        model: "embeddinggemma-2",
+        input: [duplicateAudio],
+      }),
+      (error) => error instanceof SGLEmbeddingInputError && error.code === "too_many_audio_parts",
+    );
+    assert.equal(fetched, false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test("server embedding error type and safe runtime code remain inspectable", async () => {

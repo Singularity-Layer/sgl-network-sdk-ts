@@ -33,11 +33,17 @@ export class SGLAPIError extends SGLError {
 
 export type SGLEmbeddingInputErrorCode =
   | "empty_text"
+  | "invalid_batch"
+  | "invalid_content_part"
   | "invalid_media_data"
   | "unsupported_media_type"
   | "media_too_large"
+  | "request_media_too_large"
   | "invalid_duration"
-  | "too_many_parts";
+  | "too_many_parts"
+  | "too_many_images"
+  | "too_many_audio_parts"
+  | "too_many_video_parts";
 
 /** Deterministic client-side validation error thrown by embedding part helpers. */
 export class SGLEmbeddingInputError extends SGLError {

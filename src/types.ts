@@ -237,11 +237,10 @@ export type EmbeddingErrorType =
   | "inference_error"
   | "server_error";
 
-/** Privacy-safe runtime codes that can accompany `invalid_request_error`. */
+/** Privacy-safe synchronous codes that can accompany `invalid_request_error`. */
 export type EmbeddingFailureCode =
   | "embedding_input_invalid"
-  | "embedding_context_overflow"
-  | "embedding_runtime_failed";
+  | "embedding_context_overflow";
 
 /** OpenAI-compatible response from `/v1/embeddings`. */
 export interface EmbeddingResponse {
