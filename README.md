@@ -64,6 +64,49 @@ pricing.forEach((p) =>
 );
 ```
 
+### Multimodal embeddings
+
+EmbeddingGemma 2 accepts text, images, audio, and video in one ordered input. The helper
+functions encode bytes as canonical base64 and add the required SHA-256 digest locally.
+
+```typescript
+import {
+  GridClient,
+  embeddingImage,
+  embeddingItem,
+  embeddingText,
+} from "@singularity-layer/grid";
+
+const grid = new GridClient({ apiKey: "x402c_..." });
+const imageBytes = new Uint8Array(await (await fetch("/product.png")).arrayBuffer());
+
+const response = await grid.embed({
+  model: "embeddinggemma-2",
+  input: [
+    embeddingItem(
+      embeddingText("Find results that match this image."),
+      embeddingImage(imageBytes, "image/png"),
+    ),
+  ],
+  input_type: "query",
+  dimensions: 256,
+});
+
+console.log(response.data[0].embedding);
+console.log(response.usage?.breakdown); // { text, image, audio, video }
+```
+
+Legacy text calls remain valid: `input` can still be a string or `string[]`. A multimodal
+batch can mix those strings with ordered `embeddingItem(...)` values. Use `embeddingAudio`
+and `embeddingVideo` when those media types are needed; both require `duration_seconds`.
+
+Media must be inline. Supported types are JPEG, PNG, WebP, WAV, FLAC, MP3, and MP4. The
+request limits are exported as `EMBEDDINGGEMMA2_LIMITS`: 16 batch items, 16 parts per item,
+8 images per item, 8 MiB per image or audio file, 16 MiB per video, 20 MiB decoded media per
+request, 30 seconds of audio, 32 seconds of video sampled at up to 32 frames, and 8192
+processed tokens per item. Output dimensions are 768, 512, 256, and 128. Remote media URLs
+are not accepted.
+
 ### System One / Laya
 
 Laya is served as a typed-decision model, not as chat completions.
@@ -153,7 +196,10 @@ try {
   } else if (err instanceof SGLConnectionError) {
     console.log("Orchestrator unreachable");
   } else if (err instanceof SGLAPIError) {
-    console.log(`API error ${err.statusCode}: ${err.message}`);
+    console.log(`API error ${err.statusCode} (${err.errorType}): ${err.message}`);
+    // Embedding input failures can also expose a privacy-safe `errorCode`, such as
+    // "embedding_context_overflow". Raw node errors are never returned.
+    console.log(err.errorCode);
   }
 }
 ```
