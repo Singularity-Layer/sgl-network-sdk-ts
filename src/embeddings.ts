@@ -160,7 +160,8 @@ export function validateEmbeddingGemma2Input(
   input: EmbeddingInput,
   options: EmbeddingGemma2ValidationOptions = {},
 ): void {
-  const inputType = options.input_type ?? "unspecified";
+  // The Grid applies the retrieval-query prefix when input_type is omitted.
+  const inputType = options.input_type ?? "query";
   if (!(inputType in EMBEDDING_PREFIXES)) {
     throw new SGLEmbeddingInputError("invalid_input_type", `Unsupported input_type: ${String(inputType)}`);
   }

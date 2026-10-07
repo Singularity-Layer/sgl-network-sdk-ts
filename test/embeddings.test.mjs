@@ -223,6 +223,16 @@ test("complete request preflight rejects encoded body and processed context befo
     () => validateEmbeddingGemma2Request({ model: "embeddinggemma-2", input: "x".repeat(8192) }),
     (error) => error instanceof SGLEmbeddingInputError && error.code === "context_too_large",
   );
+  // Omitted input_type uses the query prefix; this boundary would fit only as unspecified.
+  assert.throws(
+    () => validateEmbeddingGemma2Request({ model: "embeddinggemma-2", input: "x".repeat(8152) }),
+    (error) => error instanceof SGLEmbeddingInputError && error.code === "context_too_large",
+  );
+  assert.doesNotThrow(() => validateEmbeddingGemma2Request({
+    model: "embeddinggemma-2",
+    input: "x".repeat(8152),
+    input_type: "unspecified",
+  }));
   for (const [update, code] of [
     [{ dimensions: 64 }, "invalid_dimensions"],
     [{ input_type: "other" }, "invalid_input_type"],
