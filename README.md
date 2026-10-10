@@ -108,6 +108,49 @@ at up to 32 frames, and 8192 processed tokens per item. Output dimensions are 76
 and 128. Remote media URLs are not accepted. `embeddingItem(...)` and `grid.embed(...)`
 enforce the SDK-visible limits before sending a request; the node verifies decoded media.
 
+### Confidential transcription (private v1)
+
+`transcribePcm` accepts one raw, headerless PCM utterance. The bytes must already be mono,
+16 kHz, signed 16-bit little-endian PCM. The SDK rejects empty, partial-sample, and over-60-second
+inputs before network access, then reserves an eligible node using metadata only. Audio is sealed
+in the client to the node's verified X25519 key; the orchestrator receives ciphertext. The SDK
+verifies the node signature before decrypting the final transcript.
+
+```typescript
+import { GridClient } from "@singularity-layer/grid";
+
+const grid = new GridClient({ apiKey: "x402c_..." });
+const pcm = new Uint8Array(await (await fetch("/utterance.pcm")).arrayBuffer());
+
+const result = await grid.transcribePcm(pcm, {
+  language: "en", // or "auto"
+});
+
+console.log(result.text);
+console.log(result.segments);
+```
+
+Browser callers can pass a raw-PCM `Blob` to `transcribePcmFile`. This private v1 route is JSON
+and client-sealed; it is not multipart, streaming, or OpenAI wire-compatible. It does not accept
+WAV/MP3 containers, paths, or URLs. The route can remain unavailable while Grid transcription is
+dark. A submit is never retried automatically because a timed-out paid request can have an
+ambiguous settlement outcome; use the returned/requested logical request ID for reconciliation.
+
+Billable duration is exact `sample_count / 16000`, including fractional seconds. The pinned
+rate is $0.0001 per audio second, with a $0.0001 minimum charge and rounding up to whole
+micro-USDC. The SDK recomputes both quote and final charge; `job_id` must equal the original
+request UUID. After a timeout or `outcome_unknown`, reconcile that UUID before any explicit retry.
+The SDK does not sign x402 wallet payments; use API-key credits for this client.
+
+Request IDs must be canonical lowercase UUIDv4 values; the SDK generates one when omitted.
+Silent audio can return an empty transcript with no segments. Segment text has a combined
+64 KiB UTF-8 limit, and timestamp starts/ends must be nondecreasing, allowing at most 50 ms overlap.
+
+The public constants include the exact model commit and SHA-256, protocol, audio format, and
+limits. Local validation raises `SGLTranscriptionInputError`. A substituted reservation, invalid
+node key binding, bad result signature, unsupported envelope, or mismatched model/request/sample
+binding raises `SGLTranscriptionResponseError`. Neither error includes audio or transcript data.
+
 ### System One / Laya
 
 Laya is served as a typed-decision model, not as chat completions.
@@ -173,6 +216,8 @@ const grid = new GridClient({
   apiKey: "scg_...", // Optional — required for job submission
   baseUrl: "https://custom-orchestrator.example.com", // Override orchestrator URL
   timeout: 30_000, // Request timeout in ms (default: 60000)
+  transcriptionTimeout: 120_000, // STT-only request timeout in ms
+  transcriptionCanaryToken: "...", // Optional; sent only to private STT routes
 });
 ```
 

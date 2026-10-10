@@ -46,6 +46,25 @@ function randomBytes(n: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(n));
 }
 
+function b64enc(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function b64dec(value: string): Uint8Array {
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) {
+    throw new Error("invalid canonical base64");
+  }
+  const binary = atob(value);
+  const out = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  if (b64enc(out) !== value) throw new Error("invalid canonical base64");
+  return out;
+}
+
 export interface ResponseKeypair {
   secret: Uint8Array;
   pubB58: string;
@@ -83,6 +102,27 @@ export function sealInputV2(
   return { ciphertext: b58enc(out), ephemeralPub: ephB58 };
 }
 
+/** Seal input using the v2 cryptography with a canonical base64 wire envelope. */
+export function sealInputV2Base64(
+  nodePubB58: string,
+  respPubB58: string,
+  plaintext: Uint8Array,
+): { ciphertext: string; ephemeralPub: string } {
+  const nodePub = b58dec(nodePubB58);
+  const ephSecret = x25519.utils.randomPrivateKey();
+  const ephPub = x25519.getPublicKey(ephSecret);
+  const ephB58 = b58enc(ephPub);
+  const shared = x25519.getSharedSecret(ephSecret, nodePub);
+  const key = v2Key(shared, HKDF_INFO_INPUT);
+  const aad = aadInput(nodePubB58, ephB58, respPubB58);
+  const nonce = randomBytes(24);
+  const ct = xchacha20poly1305(key, nonce, aad).encrypt(plaintext);
+  const out = new Uint8Array(24 + ct.length);
+  out.set(nonce, 0);
+  out.set(ct, 24);
+  return { ciphertext: b64enc(out), ephemeralPub: ephB58 };
+}
+
 /** Open the node's (non-stream) reply sealed to our response key. */
 export function openOutputV2(
   respSecret: Uint8Array,
@@ -95,6 +135,66 @@ export function openOutputV2(
   const aad = aadOutput(respPubB58, nodeEphB58);
   const blob = b58dec(ciphertextB58);
   return xchacha20poly1305(key, blob.slice(0, 24), aad).decrypt(blob.slice(24));
+}
+
+/** Open a v2 node reply whose envelope bytes use canonical base64. */
+export function openOutputV2Base64(
+  respSecret: Uint8Array,
+  respPubB58: string,
+  nodeEphB58: string,
+  ciphertextB64: string,
+): Uint8Array {
+  const shared = x25519.getSharedSecret(respSecret, b58dec(nodeEphB58));
+  const key = v2Key(shared, HKDF_INFO_OUTPUT);
+  const aad = aadOutput(respPubB58, nodeEphB58);
+  const blob = b64dec(ciphertextB64);
+  if (blob.length < 40) throw new Error("sealed output is too short");
+  return xchacha20poly1305(key, blob.slice(0, 24), aad).decrypt(blob.slice(24));
+}
+
+const KEYBIND_PREFIX = new TextEncoder().encode("SGL-NODE-KEYBIND-v1");
+
+function uuidBytes(value: string): Uint8Array | null {
+  if (value.length !== 36) return null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return null;
+  const hex = value.replace(/-/g, "");
+  if (!/^[0-9a-fA-F]{32}$/.test(hex)) return null;
+  const out = new Uint8Array(16);
+  for (let index = 0; index < out.length; index++) {
+    out[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+  }
+  return out;
+}
+
+/** Verify the node identity signature that binds its versioned X25519 transport key. */
+export function verifyKeybindSignature(params: {
+  nodeId: string;
+  ed25519B58: string;
+  x25519B58: string;
+  keyVersion: number;
+  signatureB58: string;
+}): boolean {
+  try {
+    const id = uuidBytes(params.nodeId);
+    const ed = b58dec(params.ed25519B58);
+    const x = b58dec(params.x25519B58);
+    const signature = b58dec(params.signatureB58);
+    if (!id || ed.length !== 32 || x.length !== 32 || signature.length !== 64) return false;
+    if (!Number.isInteger(params.keyVersion) || params.keyVersion < 0 || params.keyVersion > 0xffffffff) return false;
+    const version = new Uint8Array(4);
+    new DataView(version.buffer).setUint32(0, params.keyVersion, true);
+    const message = new Uint8Array(KEYBIND_PREFIX.length + 1 + id.length + ed.length + x.length + version.length);
+    let offset = 0;
+    message.set(KEYBIND_PREFIX, offset); offset += KEYBIND_PREFIX.length;
+    message[offset] = 0; offset += 1;
+    message.set(id, offset); offset += id.length;
+    message.set(ed, offset); offset += ed.length;
+    message.set(x, offset); offset += x.length;
+    message.set(version, offset);
+    return ed25519.verify(signature, message, ed);
+  } catch {
+    return false;
+  }
 }
 
 /** Derive the stream output key once from the node's stream ephemeral (chunk 0). */
