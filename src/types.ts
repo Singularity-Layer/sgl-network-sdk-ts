@@ -90,9 +90,13 @@ export interface JobResult {
 }
 
 export interface GridClientOptions {
+  /** Timeout for STT reserve/submit only; defaults to 120000 ms. */
+  transcriptionTimeout?: number;
   apiKey?: string;
   baseUrl?: string;
   timeout?: number;
+  /** Exact private-canary token, sent only to transcription reserve/submit routes. */
+  transcriptionCanaryToken?: string;
 }
 
 /** A part of a multimodal message: text, or an image (data URL or https URL). Send an
@@ -343,9 +347,61 @@ export interface ReserveResponse {
   node_id: string;
   node_x25519_pubkey: string;
   node_ed25519_pubkey: string | null;
+  node_x25519_pubkey_sig?: string | null;
+  key_version?: number | null;
   tee_type?: string | null;
   attestation_verified?: boolean;
   expires_in_ms: number;
+}
+
+/** Options for one bounded, non-streaming transcription request. */
+export interface TranscriptionRequestOptions {
+  /** The v1 Grid model. Other model IDs are rejected before network access. */
+  model?: "whisper-1";
+  /** `auto` (default) or a lowercase ISO 639-1 language hint. */
+  language?: string;
+  /** Canonical lowercase UUIDv4. Generated when omitted; reuse only to reconcile one request. */
+  requestId?: string;
+  /** Ask the reservation endpoint to use API-key/session credits. Defaults to true. */
+  useCredits?: boolean;
+  /** Pin an eligible transcription node. */
+  node?: string;
+  /** Maximum accepted quoted price in USD. */
+  maxPrice?: number;
+}
+
+export interface TranscriptionSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface TranscriptionUsage {
+  /** Billable seconds derived from the authenticated PCM sample count. */
+  audio_seconds: number;
+  cost_usd: number;
+}
+
+/** Validated final result from `POST /v1/audio/transcriptions`. */
+export interface TranscriptionResponse {
+  object: "transcription";
+  job_id: string;
+  request_id: string;
+  model: "whisper-1";
+  model_revision: string;
+  model_sha256: string;
+  transcription_protocol: "transcription-v1";
+  sample_count: number;
+  text: string;
+  /** Language hint authenticated in the request (`auto` or a two-letter code). */
+  language_hint: string;
+  /** Detected output language, when the runtime reports one. */
+  language: string | null;
+  duration_seconds: number;
+  segments: TranscriptionSegment[];
+  usage: TranscriptionUsage;
+  billing_pending?: boolean;
+  attestation: Attestation;
 }
 
 

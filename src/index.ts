@@ -31,8 +31,14 @@ export {
   SGLNotFoundError,
   SGLConnectionError,
   SGLEmbeddingInputError,
+  SGLTranscriptionInputError,
+  SGLTranscriptionResponseError,
 } from "./errors.js";
-export type { SGLEmbeddingInputErrorCode } from "./errors.js";
+export type {
+  SGLEmbeddingInputErrorCode,
+  SGLTranscriptionInputErrorCode,
+  SGLTranscriptionResponseErrorCode,
+} from "./errors.js";
 export {
   EMBEDDINGGEMMA2_LIMITS,
   EMBEDDINGGEMMA2_MIME_TYPES,
@@ -48,6 +54,26 @@ export {
   validateEmbeddingGemma2Request,
 } from "./embeddings.js";
 export type { EmbeddingGemma2ValidationOptions } from "./embeddings.js";
+export {
+  TRANSCRIPTION_AUDIO_FORMAT,
+  TRANSCRIPTION_BITS_PER_SAMPLE,
+  TRANSCRIPTION_CHANNELS,
+  TRANSCRIPTION_MAX_DURATION_SECONDS,
+  TRANSCRIPTION_MAX_PCM_BYTES,
+  TRANSCRIPTION_MAX_RESULT_ENVELOPE_BYTES,
+  TRANSCRIPTION_MAX_SAMPLES,
+  TRANSCRIPTION_MAX_SEGMENTS,
+  TRANSCRIPTION_MAX_TEXT_BYTES,
+  TRANSCRIPTION_RATE_USD_PER_SECOND,
+  TRANSCRIPTION_MINIMUM_CHARGE_USD,
+  TRANSCRIPTION_MODEL,
+  TRANSCRIPTION_MODEL_REVISION,
+  TRANSCRIPTION_MODEL_SHA256,
+  TRANSCRIPTION_PROTOCOL,
+  TRANSCRIPTION_SAMPLE_RATE,
+  validateTranscriptionOptions,
+  validateTranscriptionPcm,
+} from "./transcriptions.js";
 export type {
   Attestation,
   AttestationProof,
@@ -92,6 +118,10 @@ export type {
   SystemOneQuestionType,
   SystemOneRequest,
   SystemOneResponse,
+  TranscriptionRequestOptions,
+  TranscriptionResponse,
+  TranscriptionSegment,
+  TranscriptionUsage,
   V1ModelInfo,
   WalletAuth,
 } from "./types.js";

@@ -61,6 +61,47 @@ export class SGLEmbeddingInputError extends SGLError {
   }
 }
 
+export type SGLTranscriptionInputErrorCode =
+  | "invalid_audio_type"
+  | "empty_audio"
+  | "invalid_pcm_length"
+  | "unsupported_audio_container"
+  | "audio_too_long"
+  | "invalid_language"
+  | "invalid_model"
+  | "invalid_request_id"
+  | "invalid_option"
+  | "file_too_large";
+
+/** Deterministic validation failure raised before transcription audio is sealed or sent. */
+export class SGLTranscriptionInputError extends SGLError {
+  readonly code: SGLTranscriptionInputErrorCode;
+
+  constructor(code: SGLTranscriptionInputErrorCode, message: string) {
+    super(message);
+    this.name = "SGLTranscriptionInputError";
+    this.code = code;
+  }
+}
+
+export type SGLTranscriptionResponseErrorCode =
+  | "invalid_reservation"
+  | "unverified_result"
+  | "invalid_envelope"
+  | "invalid_result"
+  | "binding_mismatch";
+
+/** A transcription response failed signature, envelope, shape, or request-binding checks. */
+export class SGLTranscriptionResponseError extends SGLError {
+  readonly code: SGLTranscriptionResponseErrorCode;
+
+  constructor(code: SGLTranscriptionResponseErrorCode, message: string) {
+    super(message);
+    this.name = "SGLTranscriptionResponseError";
+    this.code = code;
+  }
+}
+
 export class SGLAuthError extends SGLAPIError {
   constructor(
     statusCode: number,
