@@ -44,7 +44,67 @@ export interface PodCapabilities {
   backups?: boolean;
 }
 
+/** Public engine names: ClawPod (OpenClaw), HermPod (Hermes) and Pi pod (the Pi coding agent). */
+export type PodEngine = "clawpod" | "hermpod" | "pipod";
+
+/** Built-in providers for your own key. A preset fixes the base URL; `custom` takes yours. */
+export type PodAiPreset = "openrouter" | "openai" | "venice" | "0g" | "custom";
+
+/**
+ * One provider in a bring-your-own-key list. Either your own provider (a preset or `custom`
+ * with `base_url`), or `{ preset: "singularity", model }` for a Singularity Layer model paid
+ * from your credits (needs `managed_models` on; ClawPod only for now).
+ */
+export type PodAiProvider =
+  | {
+      preset?: PodAiPreset;
+      name?: string;
+      /** Only for `custom`; a preset fixes its own URL. Must be https. */
+      base_url?: string;
+      /** Only for `custom`. Default `openai-completions`. */
+      api?: "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative";
+      model: string;
+      /** Required when adding a provider. Left out on an update, the stored key is kept. */
+      api_key?: string;
+      /** The stored provider's id (or `primary`) when editing an existing list. */
+      id?: string;
+    }
+  | { preset: "singularity"; model: string; id?: string };
+
+export interface PodAiOptions {
+  /** `managed`: our models, billed from credits. `byok`: your own provider key. */
+  mode: "managed" | "byok";
+  api_key?: string;
+  base_url?: string;
+  api?: string;
+  /** BYOK primary provider preset. */
+  preset?: PodAiPreset;
+  /** A display name for the primary provider (at most 60 characters). */
+  name?: string;
+  /** BYOK fallbacks, tried in order when the primary fails. At most 3, plus one Singularity entry. ClawPod only. */
+  fallbacks?: PodAiProvider[];
+  /**
+   * BYOK only: also allow Singularity Layer models, billed per call from your credits (no
+   * included allowance). On by default for a BYOK ClawPod; costs nothing unless used.
+   */
+  managed_models?: boolean;
+}
+
 export interface CreatePodOptions {
+  /** Which agent runs in the pod. Default `clawpod`. */
+  engine?: PodEngine;
+  /** A pod template id from the catalog (`GET /pods/catalog`). */
+  template?: string;
+  /** The template's setup answers. */
+  template_config?: Record<string, unknown>;
+  /** Channel tokens a template needs at deploy, for example `{ telegram: "<bot token>" }`. */
+  channels?: Record<string, unknown>;
+  /** Refuse the create, before any charge, if the price would be higher than this. */
+  max_total_usd?: number;
+  agent_instructions?: string;
+  agent_identity?: string;
+  heartbeat_prompt?: string;
+  agent_heartbeat_minutes?: number;
   tier?: string;
   /** Display name, and the machine's label. */
   name?: string;
@@ -59,14 +119,96 @@ export interface CreatePodOptions {
   /** Minimum 24. Prepaid, and refunded pro-rata if you destroy early. */
   term_hours?: number;
   capabilities?: PodCapabilities;
-  /** Bring your own LLM key instead of using ours. */
-  ai?: { mode: "managed" | "byok"; api_key?: string; base_url?: string; api?: string };
+  /** Bring your own LLM key (with fallbacks) instead of using ours. */
+  ai?: PodAiOptions;
   /**
    * Supply this when your caller has a natural id for the attempt. Left out, one is generated,
    * which still protects an automatic retry inside this call but not a retry from your side
    * after a process death.
    */
   idempotencyKey?: string;
+}
+
+export interface UpdatePodOptions {
+  name?: string;
+  model?: string;
+  slug?: string | null;
+  auto_renew?: boolean;
+  agent_instructions?: string | null;
+  agent_identity?: string | null;
+  heartbeat_prompt?: string | null;
+  agent_heartbeat_minutes?: number;
+  /**
+   * BYOK pods: change the key or URL of the primary, turn Singularity Layer models on or off,
+   * or replace the whole ordered provider list (`providers`, primary first). Provider entries
+   * that leave out `api_key` keep the stored key.
+   */
+  ai?: {
+    api_key?: string;
+    base_url?: string;
+    api?: string;
+    managed_models?: boolean;
+    providers?: PodAiProvider[];
+  };
+}
+
+/** Result of `exec`. Commands run as the unprivileged `pod` user in the workspace. */
+export interface PodExecResult {
+  exit_code: number | null;
+  timed_out: boolean;
+  duration_ms: number | null;
+  stdout: string;
+  stderr: string;
+  /** True when a stream passed the 1 MB cap and was cut. */
+  truncated: boolean;
+  cwd: string | null;
+}
+
+export interface PodFile {
+  path: string;
+  content?: string;
+  size?: number | null;
+  modified?: string | null;
+  /** True for files the platform manages; your edits to them may be replaced. */
+  managed?: boolean;
+}
+
+export interface PodPort {
+  port: number;
+  visibility: "public" | "private";
+  /** Returned only when the port is opened (or rotated). Save it. */
+  url?: string;
+  /** Private ports only, returned once. Send it in `token_header`. */
+  token?: string;
+  token_header?: string;
+  note?: string;
+  [field: string]: unknown;
+}
+
+export interface ClonePodOptions {
+  /** Your Agent Vault backup passphrase for the source pod. Never stored in plain text. */
+  passphrase: string;
+  /** A specific completed backup of the source. Default: the newest one. */
+  backup_id?: string;
+  name?: string;
+  term_hours?: number;
+  region?: string;
+  max_total_usd?: number;
+  /** Channel tokens are not copied; pass them here to set them on the clone. */
+  channels?: Record<string, unknown>;
+  /** Required when the source uses your own key: keys are never copied. */
+  ai?: PodAiOptions;
+  external_ref?: string;
+  idempotencyKey?: string;
+}
+
+export interface ClonePodResult {
+  pod: Pod;
+  clone: {
+    source_pod_id: string;
+    backup_id: string | null;
+    restore: { status: string; message?: string; [field: string]: unknown };
+  };
 }
 
 export type PodStatus = "provisioning" | "online" | "offline" | "grace" | "destroying" | "destroyed";
@@ -211,7 +353,7 @@ export class PodsClient {
     return this.request("GET", `/pods${qs ? `?${qs}` : ""}`);
   }
 
-  async updatePod(podId: string, patch: { name?: string; model?: string; slug?: string; auto_renew?: boolean }): Promise<Pod> {
+  async updatePod(podId: string, patch: UpdatePodOptions): Promise<Pod> {
     return (await this.request<{ pod: Pod }>("PATCH", `/pods/${podId}`, patch)).pod;
   }
 
@@ -427,6 +569,69 @@ export class PodsClient {
 
   async getBackups(podId: string): Promise<{ enabled: boolean; passphrase_set: boolean; last_auto_at: string | null }> {
     return (await this.request<{ backups: any }>("GET", `/pods/${podId}/backups`)).backups;
+  }
+
+
+  // ── Sandbox: run commands, edit files, expose ports, clone ─────────────────────────────
+  //
+  // Owner only: an API key with the `pods:control:write` scope (or a signed-in session). A
+  // pod's own key cannot use these, so an agent cannot get a shell on itself. The pod must be
+  // online; right after it first comes online the sandbox may answer 409 for about a minute.
+
+  /** Run a shell command in the pod's workspace. `timeout_seconds` is 1 to 300 (default 60). */
+  async exec(podId: string, opts: { command: string; timeout_seconds?: number }): Promise<PodExecResult> {
+    return (await this.request<{ exec: PodExecResult }>("POST", `/pods/${podId}/exec`, opts)).exec;
+  }
+
+  /** List the files in the pod's workspace. */
+  async listFiles(podId: string): Promise<{ files: PodFile[]; root: string | null }> {
+    return this.request("GET", `/pods/${podId}/files`);
+  }
+
+  /** Read one file from the pod. */
+  async readFile(podId: string, path: string): Promise<PodFile> {
+    return (await this.request<{ file: PodFile }>("GET", `/pods/${podId}/files?path=${encodeURIComponent(path)}`)).file;
+  }
+
+  /** Write (create or replace) a text file in the pod. */
+  async writeFile(podId: string, path: string, content: string): Promise<PodFile> {
+    return (await this.request<{ file: PodFile }>("PUT", `/pods/${podId}/files`, { path, content })).file;
+  }
+
+  /**
+   * Give a port on the pod a URL. `private` ports also need a token header on every request.
+   * The URL (and token) are returned ONCE; opening the same port again rotates them. Ports
+   * below 1024 and the ports the platform uses on the pod are refused. At most 5 open.
+   */
+  async openPort(podId: string, port: number, visibility: "public" | "private" = "public"): Promise<{ port: PodPort; rotated: boolean }> {
+    return this.request("POST", `/pods/${podId}/ports`, { port, visibility });
+  }
+
+  /** The pod's open ports. URLs and tokens are never listed. */
+  async listPorts(podId: string): Promise<{ ports: PodPort[]; limit: number }> {
+    return this.request("GET", `/pods/${podId}/ports`);
+  }
+
+  async closePort(podId: string, port: number): Promise<{ closed: boolean; port: number }> {
+    return this.request("DELETE", `/pods/${podId}/ports/${port}`);
+  }
+
+  /**
+   * Create a NEW pod from the source pod's Agent Vault backup. Billed exactly like
+   * `createPod`, and idempotent the same way: a key is generated if you do not pass one.
+   * The backup is restored automatically once the new pod is online; follow it with
+   * {@link cloneStatus} on the NEW pod's id.
+   */
+  async clonePod(sourcePodId: string, options: ClonePodOptions): Promise<ClonePodResult> {
+    const { idempotencyKey, ...body } = options;
+    return this.request<ClonePodResult>("POST", `/pods/${sourcePodId}/clone`, body, {
+      "Idempotency-Key": idempotencyKey ?? randomKey(),
+    });
+  }
+
+  /** The restore job of a pod that was created as a clone. */
+  async cloneStatus(podId: string): Promise<Record<string, unknown>> {
+    return (await this.request<{ clone: Record<string, unknown> }>("GET", `/pods/${podId}/clone`)).clone;
   }
 
   // ── Events and webhooks ────────────────────────────────────────────────────────────────

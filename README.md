@@ -209,6 +209,52 @@ const attestation = await grid.getAttestation(job.job_id);
 console.log(`Verified: ${attestation.verified}, TEE: ${attestation.tee_type}`);
 ```
 
+### Anthropic Messages API (and Claude Code)
+
+The Grid also speaks the Anthropic Messages format at `POST /v1/messages`, next to the
+OpenAI one. Same auth, same credits, same nodes. Use a Grid model id, not a Claude id.
+
+```typescript
+import { GridClient } from "@singularity-layer/grid";
+
+const grid = new GridClient({ apiKey: process.env.SGL_API_KEY });
+
+const msg = await grid.messages({
+  model: "qwen-2.5-32b",
+  max_tokens: 512,
+  system: "Answer in one sentence.",
+  messages: [{ role: "user", content: "What is a TEE?" }],
+});
+console.log(msg.content[0]);
+
+// Streaming: parsed Anthropic events (message_start, content_block_delta, ..., message_stop)
+for await (const ev of grid.messagesStream({ model: "qwen-2.5-32b", max_tokens: 512, messages: [{ role: "user", content: "Count to 5" }] })) {
+  if (ev.type === "content_block_delta" && (ev as any).delta.type === "text_delta") process.stdout.write((ev as any).delta.text);
+}
+
+// Free input-token estimate
+const { input_tokens } = await grid.countMessageTokens({ model: "qwen-2.5-32b", messages: [{ role: "user", content: "hi" }] });
+```
+
+The official Anthropic SDK works too: `new Anthropic({ apiKey: "x402c_...", baseURL: "https://grid.x402compute.cc" })`.
+
+**Claude Code on the Grid.** Point Claude Code at the Grid with your Singularity Layer compute key:
+
+```bash
+export ANTHROPIC_BASE_URL=https://grid.x402compute.cc
+export ANTHROPIC_API_KEY=x402c_...   # your compute API key
+claude --model qwen-2.5-32b
+```
+
+Claude Code's own system prompt and tools are about 13k tokens, so only large-context models
+fit. Today that is `qwen-2.5-32b` (32k context). Check `max_input_tokens` in `GET /v1/models`
+(send an `anthropic-version` header to get the Anthropic shape) before picking another one.
+
+What is not supported (clean 400): extended thinking with a budget, structured outputs, server
+tools such as web search, documents and citations, `top_p` / `top_k`, and assistant prefill.
+Images work on vision models only, as base64, non-streaming. Full list:
+[Anthropic-compatible API docs](https://docs.x402layer.cc).
+
 ## Configuration
 
 ```typescript
@@ -292,3 +338,55 @@ The six processor methods on `GridClient` (`deployProcessor`, `invokeProcessor`,
 pointed at `/grid/processors`, which has never existed — every call returned 404 — and their types
 described an older design that was never shipped. Use `ProcessorsClient`. Nothing else changed:
 chat, embeddings, jobs, models, capacity, pricing, reserve and the vault are untouched.
+
+## Agent Pods
+
+`PodsClient` creates and drives hosted agents on `compute.x402layer.cc` with a compute API key.
+
+```typescript
+import { PodsClient } from "@singularity-layer/grid";
+
+const pods = new PodsClient({ apiKey: process.env.SGL_API_KEY! });
+
+// engine: "clawpod" (OpenClaw, default), "hermpod" (Hermes) or "pipod" (the Pi coding agent)
+const pod = await pods.createPod({ engine: "pipod", tier: "starter", ai: { mode: "managed" }, max_total_usd: 5 });
+await pods.waitForOnline(pod.id);
+```
+
+**Bring your own key, with fallbacks.** Presets fix the provider URL: `openrouter`, `openai`,
+`venice`, `0g`, or `custom` with your own `base_url`. Fallbacks are tried in order when the
+primary fails. `managed_models` also allows Singularity Layer models, paid per call from your
+credits (fallbacks and our models are ClawPod only for now).
+
+```typescript
+await pods.createPod({
+  engine: "clawpod",
+  ai: {
+    mode: "byok",
+    preset: "venice",
+    api_key: process.env.VENICE_API_KEY,
+    fallbacks: [
+      { preset: "openrouter", model: "meta-llama/llama-3.3-70b-instruct", api_key: process.env.OPENROUTER_API_KEY },
+      { preset: "singularity", model: "z-ai/glm-5.3" },
+    ],
+    managed_models: true,
+  },
+});
+```
+
+**Sandbox.** Run commands, edit files, give a port a URL, and clone a pod from its Agent Vault
+backup. Needs an API key with the `pods:control:write` scope; a pod's own key cannot use these.
+
+```typescript
+const run = await pods.exec(pod.id, { command: "python3 --version", timeout_seconds: 30 });
+await pods.writeFile(pod.id, "hello.txt", "hi");
+const file = await pods.readFile(pod.id, "hello.txt");
+
+const { port } = await pods.openPort(pod.id, 8080, "public"); // port.url is shown once
+await pods.closePort(pod.id, 8080);
+
+const clone = await pods.clonePod(pod.id, { passphrase: process.env.VAULT_PASSPHRASE! });
+console.log(await pods.cloneStatus(clone.pod.id));
+```
+
+See `examples/pods-sandbox.ts`.
