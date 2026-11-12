@@ -1,4 +1,22 @@
 export { GridClient, DEFAULT_BASE_URL } from "./client.js";
+export { ANTHROPIC_VERSION } from "./messages.js";
+export type {
+  MessagesRequest,
+  MessagesResponse,
+  MessagesUsage,
+  MessageParam,
+  MessageContentBlock,
+  MessageTextBlock,
+  MessageImageBlock,
+  MessageToolUseBlock,
+  MessageToolResultBlock,
+  MessageTool,
+  MessageToolChoice,
+  MessageStopReason,
+  MessageStreamEvent,
+  CountTokensRequest,
+  CountTokensResponse,
+} from "./messages.js";
 export { PodsClient, DEFAULT_PODS_BASE_URL, verifyPodWebhook } from "./pods.js";
 export type {
   Pod,
@@ -9,6 +27,16 @@ export type {
   PodCapabilities,
   PodsClientOptions,
   CreatePodOptions,
+  UpdatePodOptions,
+  PodEngine,
+  PodAiOptions,
+  PodAiProvider,
+  PodAiPreset,
+  PodExecResult,
+  PodFile,
+  PodPort,
+  ClonePodOptions,
+  ClonePodResult,
 } from "./pods.js";
 export {
   VaultClient,

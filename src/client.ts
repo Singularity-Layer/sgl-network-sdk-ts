@@ -24,6 +24,14 @@ import {
   validateTranscriptionReservation,
   type SealedTranscriptionWireResponse,
 } from "./transcriptions.js";
+import {
+  ANTHROPIC_VERSION,
+  type CountTokensRequest,
+  type CountTokensResponse,
+  type MessageStreamEvent,
+  type MessagesRequest,
+  type MessagesResponse,
+} from "./messages.js";
 import type {
   AttestationProof,
   CapacityResponse,
@@ -728,6 +736,124 @@ export class GridClient {
       try { await reader.cancel(); } catch { /* ignore */ }
     }
     if (!sawFinal) throw new SGLAPIError(502, "stream ended before final chunk (truncated)");
+  }
+
+  // -- Anthropic Messages API ------------------------------------------------
+
+  /**
+   * Anthropic-format chat via `POST /v1/messages` (non-streaming).
+   *
+   * The same request and response shape as the Anthropic Messages API, served by Grid models.
+   * Use a Grid model id, not a Claude id. Requires `apiKey` (credits); the TS SDK does not sign
+   * x402 payments. The orchestrator seals the prompt to the node (the API path), so this is
+   * not client-side end-to-end encrypted like `chatCompletions`.
+   *
+   * Long replies: prefer `messagesStream`. A non-streaming reply that runs past the Grid's sync
+   * window comes back as a 504 with a `job_id`; do not retry it, that starts a second paid job.
+   */
+  async messages(request: MessagesRequest): Promise<MessagesResponse> {
+    if (request.stream) throw new SGLAPIError(400, "Use messagesStream() for stream: true.");
+    try {
+      return await this.request<MessagesResponse>("POST", "/v1/messages", request, {
+        "anthropic-version": ANTHROPIC_VERSION,
+      });
+    } catch (err) {
+      if (err instanceof SGLAPIError && err.statusCode === 402) {
+        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", err.body);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Streaming Anthropic-format chat via `POST /v1/messages` with `stream: true`.
+   *
+   * Yields each server-sent event parsed from JSON, in Anthropic order (`message_start`,
+   * `content_block_start`, `content_block_delta`, ..., `message_stop`). `ping` events are
+   * yielded too. An `error` event after the stream started throws `SGLAPIError`.
+   * Text arrives as `content_block_delta` events whose `delta.type` is `text_delta`.
+   */
+  async *messagesStream(request: MessagesRequest): AsyncGenerator<MessageStreamEvent, void, unknown> {
+    const controller = new AbortController();
+    const overall = setTimeout(() => controller.abort(), Math.max(this.timeout, 300_000));
+    let resp: Response;
+    try {
+      resp = await fetch(`${this.baseUrl}/v1/messages`, {
+        method: "POST",
+        headers: { ...this.headers, Accept: "text/event-stream", "anthropic-version": ANTHROPIC_VERSION },
+        body: JSON.stringify({ ...request, stream: true }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(overall);
+      throw new SGLConnectionError(
+        `Could not connect to ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!resp.ok) {
+      clearTimeout(overall);
+      let errBody: Record<string, unknown> | undefined;
+      let message = resp.statusText;
+      try {
+        errBody = (await resp.json()) as Record<string, unknown>;
+        const e = errBody?.error;
+        if (typeof e === "string") message = e;
+        else if (e && typeof e === "object" && "message" in e) message = String((e as { message: unknown }).message);
+      } catch { /* ignore */ }
+      if (resp.status === 402) {
+        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", errBody);
+      }
+      if (resp.status === 401 || resp.status === 403) throw new SGLAuthError(resp.status, message, errBody);
+      if (resp.status === 404) throw new SGLNotFoundError(message, errBody);
+      throw new SGLAPIError(resp.status, message, errBody);
+    }
+    if (!resp.body) {
+      clearTimeout(overall);
+      throw new SGLAPIError(502, "stream response had no body");
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const dataStr = raw.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("\n");
+          if (!dataStr) continue;
+          let event: MessageStreamEvent;
+          try {
+            event = JSON.parse(dataStr) as MessageStreamEvent;
+          } catch {
+            throw new SGLAPIError(502, "malformed stream event");
+          }
+          if (event.type === "error") {
+            const e = event.error as { type?: string; message?: string } | undefined;
+            throw new SGLAPIError(502, e?.message ?? "stream aborted by server", event as Record<string, unknown>);
+          }
+          yield event;
+          if (event.type === "message_stop") return;
+        }
+      }
+    } finally {
+      clearTimeout(overall);
+      try { await reader.cancel(); } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Estimate input tokens for a Messages request via `POST /v1/messages/count_tokens`.
+   * Free. An estimate from the Grid's estimator (the one its context guard uses), not a
+   * model tokenizer count.
+   */
+  async countMessageTokens(request: CountTokensRequest): Promise<CountTokensResponse> {
+    return this.request<CountTokensResponse>("POST", "/v1/messages/count_tokens", request, {
+      "anthropic-version": ANTHROPIC_VERSION,
+    });
   }
 
 }
