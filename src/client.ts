@@ -279,7 +279,7 @@ export class GridClient {
       if (error instanceof SGLAPIError && error.statusCode === 402) {
         throw new SGLAPIError(
           402,
-          "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.",
+          "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.",
           error.body,
         );
       }
@@ -354,7 +354,7 @@ export class GridClient {
       if (error instanceof SGLAPIError && error.statusCode === 402) {
         throw new SGLAPIError(
           402,
-          "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.",
+          "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.",
           error.body,
         );
       }
@@ -492,7 +492,7 @@ export class GridClient {
       data = await this.request("POST", "/v1/chat/completions", body);
     } catch (err) {
       if (err instanceof SGLAPIError && err.statusCode === 402) {
-        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
+        throw new SGLAPIError(402, "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
       }
       throw err;
     }
@@ -543,7 +543,7 @@ export class GridClient {
       return (await this.request("POST", "/v1/embeddings", body)) as EmbeddingResponse;
     } catch (err) {
       if (err instanceof SGLAPIError && err.statusCode === 402) {
-        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", err.body);
+        throw new SGLAPIError(402, "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", err.body);
       }
       throw err;
     }
@@ -569,7 +569,7 @@ export class GridClient {
       return (await this.request("POST", "/v1/systemone", body)) as SystemOneResponse;
     } catch (err) {
       if (err instanceof SGLAPIError && err.statusCode === 402) {
-        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
+        throw new SGLAPIError(402, "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
       }
       throw err;
     }
@@ -630,7 +630,7 @@ export class GridClient {
     if (!resp.ok) {
       clearTimeout(overall);
       if (resp.status === 402) {
-        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
+        throw new SGLAPIError(402, "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.");
       }
       let message = resp.statusText;
       try {
@@ -759,7 +759,7 @@ export class GridClient {
       });
     } catch (err) {
       if (err instanceof SGLAPIError && err.statusCode === 402) {
-        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", err.body);
+        throw new SGLAPIError(402, "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", err.body);
       }
       throw err;
     }
@@ -801,7 +801,7 @@ export class GridClient {
         else if (e && typeof e === "object" && "message" in e) message = String((e as { message: unknown }).message);
       } catch { /* ignore */ }
       if (resp.status === 402) {
-        throw new SGLAPIError(402, "Payment required — pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", errBody);
+        throw new SGLAPIError(402, "Payment required: pass an apiKey (credits). The TS SDK does not sign x402 payments; use the wallet/browser flow for pay-per-call.", errBody);
       }
       if (resp.status === 401 || resp.status === 403) throw new SGLAuthError(resp.status, message, errBody);
       if (resp.status === 404) throw new SGLNotFoundError(message, errBody);
